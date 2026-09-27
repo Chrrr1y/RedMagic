@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="28.0dp"
+    android:height="28.0dp"
+    android:viewportWidth="28.0"
+    android:viewportHeight="28.0">
+    <!-- Nubia squircle background in official file manager amber orange -->
+    <path
+        android:fillColor="#fffa9928"
+        android:pathData="M0,12.8C0,8.32 0,6.079 0.872,4.368C1.639,2.863 2.863,1.639 4.368,0.872C6.079,0 8.32,0 12.8,0H15.2C19.68,0 21.921,0 23.632,0.872C25.137,1.639 26.361,2.863 27.128,4.368C28,6.079 28,8.32 28,12.8V15.2C28,19.68 28,21.921 27.128,23.632C26.361,25.137 25.137,26.361 23.632,27.128C21.921,28 19.68,28 15.2,28H12.8C8.32,28 6.079,28 4.368,27.128C2.863,26.361 1.639,25.137 0.872,23.632C0,21.921 0,19.68 0,15.2V12.8Z" />
+    <!-- Folder body glyph in crisp white -->
+    <path
+        android:fillColor="#ffffffff"
+        android:pathData="M6.5,8.0 C5.67,8.0 5.0,8.67 5.0,9.5 L5.0,18.5 C5.0,19.33 5.67,20.0 6.5,20.0 L21.5,20.0 C22.33,20.0 23.0,19.33 23.0,18.5 L23.0,12.0 C23.0,11.17 22.33,10.5 21.5,10.5 L14.0,10.5 L12.0,8.0 Z" />
+    <!-- Subtle front flap accent -->
+    <path
+        android:fillColor="#ffffffff"
+        android:fillAlpha="0.28"
+        android:pathData="M5.0,12.2 L23.0,12.2 L23.0,18.5 C23.0,19.33 22.33,20.0 21.5,20.0 L6.5,20.0 C5.67,20.0 5.0,19.33 5.0,18.5 Z" />
+</vector>

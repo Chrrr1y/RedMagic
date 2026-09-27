@@ -1,0 +1,78 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION_CODE: ${{ 26091400 + github.run_number }}
+      VERSION_NAME: 4.0.0-ci.${{ github.run_number }}
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36 SDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Configure release signing
+        shell: bash
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" \
+              && -n "$ANDROID_KEYSTORE_PASSWORD" \
+              && -n "$ANDROID_KEY_ALIAS" \
+              && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            KEYSTORE_PATH="$RUNNER_TEMP/redmagic-release.jks"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+            echo "RELEASE_STORE_FILE=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+            echo "RELEASE_STORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+          else
+            echo "Release keystore secrets are incomplete; using the runner's debug key."
+          fi
+
+      - name: Test and build release APK
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Generate checksum
+        working-directory: app/build/outputs/apk/release
+        run: sha256sum app-release.apk > app-release.apk.sha256
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: RedMagic Helper build ${{ github.run_number }}
+          generate_release_notes: true
+          make_latest: true
+          files: |
+            app/build/outputs/apk/release/app-release.apk
+            app/build/outputs/apk/release/app-release.apk.sha256
