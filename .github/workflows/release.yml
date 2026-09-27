@@ -1,4 +1,4 @@
-name: Build and Release
+name: BuildApk
 
 on:
   push:
@@ -14,11 +14,10 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build-apk:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     env:
-      VERSION_CODE: ${{ 26091400 + github.run_number }}
-      VERSION_NAME: 4.0.0-ci.${{ github.run_number }}
       ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -42,6 +41,14 @@ jobs:
       - name: Install Android 36 SDK
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Set build version
+        shell: bash
+        run: |
+          VERSION_CODE=$((26091400 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="4.0.0-ci.${GITHUB_RUN_NUMBER}"
+          printf 'VERSION_CODE=%s\nVERSION_NAME=%s\n' \
+            "$VERSION_CODE" "$VERSION_NAME" >> "$GITHUB_ENV"
+
       - name: Configure release signing
         shell: bash
         run: |
@@ -59,7 +66,7 @@ jobs:
             echo "Release keystore secrets are incomplete; using the runner's debug key."
           fi
 
-      - name: Test and build release APK
+      - name: Run tests and build release APK
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
 
       - name: Generate checksum

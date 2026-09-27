@@ -1,38 +1,42 @@
 # RedMagic Helper Rewrite
 
-这是从设备 APK 离线分析后重新编写的 LibXposed API 102 模块，不是对原 APK 的机型条件或
-白名单打补丁。
+RedMagic Helper Rewrite 是基于 LibXposed API 102 的 Android 模块，按宿主进程分别安装 Hook，不修改宿主 APK，也不通过替换设备型号绕过检查。
 
-当前工作区包含：
+## 功能范围
 
-- `app/src/main/java/`：新的 Hook 入口、运行时反射适配层和按作用域拆分的宿主适配器。
+模块覆盖系统更新、系统界面、游戏助手与游戏空间、桌面、设置、NFC、风扇、安装器、权限控制器、NeoStore、Beautify，以及 Nubia Browser。功能按设置项启用；宿主版本缺少目标类或方法时只跳过对应能力并记录 `CAPABILITY_MISSING`。
 
-离线提取的设备 APK、反编译文件和临时工作产物不纳入 Git。
+浏览器适配默认关闭。设置页可以单独控制启动广告、默认搜索页、资讯入口、“我的”页面和下载推荐等项目。
 
-适配策略：不读取或替换设备型号，也不把功能开关改成无条件开启。模块使用 APK 内声明的静态
-作用域，避免直接更新模块后依赖旧的动态作用域缓存；每个作用域只在
-对应配置打开、且当前宿主类/方法签名存在时安装 Hook；找不到能力时记录
-`CAPABILITY_MISSING` 并继续运行其他作用域。当前已覆盖原静态清单中的系统更新、Beautify、
-游戏助手/游戏空间/游戏高光/游戏实验室、MTP、NeoStore、安装器、权限控制器、桌面、设置、
-推荐图标、Mi Health、NFC、风扇、系统服务入口，以及设备提取版本
-`cn.nubia.browser`（`V8.1.4.2026081811a` / versionCode `22974`）。当前作用域共 24 个。
+设备提取的 APK、反编译目录和临时工作文件不纳入 Git。
 
-浏览器适配默认关闭，可在设置页单独控制跳过启动广告、启动搜索页、隐藏资讯/视频入口和精简
-“我的”页面。它只通过 `BrowserAdapter` 在浏览器进程内 Hook 已确认的类、方法和资源，不修改
-原浏览器 APK；后续版本缺失能力时只记录 `CAPABILITY_MISSING`。
+## 本地构建
 
-构建：
+需要 JDK 17、Android SDK Platform 36 和网络连接以解析 Gradle 插件及依赖。
+
+运行单测并构建 Debug APK：
 
 ```bash
-./gradlew :app:testDebugUnitTest :app:assembleDebug
+./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
 ```
 
-生成 APK：`app/build/outputs/apk/debug/app-debug.apk`。
+Debug APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。构建不会自动上传 APK 到第三方文件服务。
 
-推送到 `main` 的每个 commit 都会运行单元测试、构建 Release APK，并创建 GitHub Release。
-Release 包默认使用 CI 临时 debug 签名，可直接安装，但不同 CI runner 之间不能保证签名一致。
-要让后续版本覆盖升级，请在 GitHub 仓库 Secrets 中配置 `ANDROID_KEYSTORE_BASE64`、
-`ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS` 和 `ANDROID_KEY_PASSWORD`，供 Action 使用同一
-Release keystore。
+构建 Release APK：
 
-本地 Release 构建：`./gradlew :app:assembleRelease`。
+```bash
+./gradlew --no-daemon :app:assembleRelease
+```
+
+## GitHub Release
+
+`.github/workflows/release.yml` 中的 `BuildApk` 工作流在每次推送到 `main` 后运行单测、构建 Release APK、生成 SHA-256 校验文件并创建 GitHub Release。也可以从 Actions 页面手动运行。每次运行递增 Android `versionCode`，Release 标签为 `build-<run number>`。
+
+未配置签名 Secrets 时，Release 使用 GitHub runner 的临时 debug keystore，APK 可以安装，但不同 runner 的签名不保证相同，后续版本可能无法覆盖升级。要保持签名一致，请配置以下仓库 Secrets：
+
+- `ANDROID_KEYSTORE_BASE64`：Release keystore 的 Base64 内容，例如用 `base64 -w0 redmagic-release.jks` 生成。
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+本模块使用自己的签名，不能直接覆盖由原作者签名的旧版模块。升级前需在 LSPosed/管理器备份设置和作用域，并确认接受签名不同带来的重装要求。
