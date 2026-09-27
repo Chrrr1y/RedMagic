@@ -23,6 +23,7 @@ import android.os.Looper;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -2807,7 +2808,7 @@ public final class BrowserAdapter implements HostAdapter {
         try {
             Class<?> amClz = session.findOptionalClass("cn.nubia.account.AccountManager");
             if (amClz != null) {
-                Object am = HookValues.invoke(amClz, "I");
+                Object am = invokeStatic(amClz, "I");
                 if (am != null) {
                     HookValues.invokeNoArg(am, "y");
                 }
@@ -2827,7 +2828,7 @@ public final class BrowserAdapter implements HostAdapter {
     private static Object getAccountManager(HookSession session) {
         try {
             Class<?> amClz = session.findOptionalClass("cn.nubia.account.AccountManager");
-            return amClz == null ? null : HookValues.invoke(amClz, "I");
+            return amClz == null ? null : invokeStatic(amClz, "I");
         } catch (Throwable ignored) {
             return null;
         }
@@ -2843,11 +2844,27 @@ public final class BrowserAdapter implements HostAdapter {
             Class<?> dcClz = session.findOptionalClass(
                     "com.android.browser.datacenter.DataCenter");
             if (dcClz != null) {
-                Object dc = HookValues.invoke(dcClz, "getInstance");
+                Object dc = invokeStatic(dcClz, "getInstance");
                 return hasText(invokeNoArgSafely(dc, "getAccountUid"));
             }
         } catch (Throwable ignored) {}
         return false;
+    }
+
+    static Object invokeStatic(Class<?> owner, String methodName, Object... args)
+            throws ReflectiveOperationException {
+        if (owner == null) {
+            return null;
+        }
+        Class<?>[] parameterTypes = new Class<?>[args.length];
+        for (int i = 0; i < args.length; i++) {
+            parameterTypes[i] = args[i] == null ? null : args[i].getClass();
+        }
+        Method method = HookValues.findMethod(owner, methodName, parameterTypes);
+        if (method == null || !Modifier.isStatic(method.getModifiers())) {
+            return null;
+        }
+        return method.invoke(null, args);
     }
 
     private static Object invokeNoArgSafely(Object owner, String methodName) {
@@ -2975,7 +2992,8 @@ public final class BrowserAdapter implements HostAdapter {
                                 Class<?> nuThemeHelper = session.findOptionalClass("com.android.browser.ui.helper.NuThemeHelper");
                                 int colorLoginRes = ctx.getResources().getIdentifier("browser_popmenu_user_center_color_login", "color", ctx.getPackageName());
                                 if (colorLoginRes != 0 && nuThemeHelper != null) {
-                                    Integer color = (Integer) HookValues.invoke(nuThemeHelper, "b", colorLoginRes);
+                                    Integer color = (Integer) invokeStatic(
+                                            nuThemeHelper, "b", colorLoginRes);
                                     if (color != null) {
                                         tv.setTextColor(color);
                                         colorSet = true;
@@ -2997,7 +3015,8 @@ public final class BrowserAdapter implements HostAdapter {
                                 Class<?> nuThemeHelper = session.findOptionalClass("com.android.browser.ui.helper.NuThemeHelper");
                                 int colorUnloginRes = ctx.getResources().getIdentifier("browser_popmenu_user_center_color_unlogin", "color", ctx.getPackageName());
                                 if (colorUnloginRes != 0 && nuThemeHelper != null) {
-                                    Integer color = (Integer) HookValues.invoke(nuThemeHelper, "b", colorUnloginRes);
+                                    Integer color = (Integer) invokeStatic(
+                                            nuThemeHelper, "b", colorUnloginRes);
                                     if (color != null) {
                                         tv.setTextColor(color);
                                         colorSet = true;
@@ -3078,7 +3097,7 @@ public final class BrowserAdapter implements HostAdapter {
             } else {
                 Class<?> amClz = session.findOptionalClass("cn.nubia.account.AccountManager");
                 try {
-                    Object am = amClz != null ? HookValues.invoke(amClz, "I") : null;
+                    Object am = amClz != null ? invokeStatic(amClz, "I") : null;
                     if (am != null) {
                         HookValues.invoke(am, "U", act);
                         return;
