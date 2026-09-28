@@ -10,6 +10,8 @@ RedMagic Helper Rewrite 是基于 LibXposed API 102 的 Android 模块，按宿�
 
 设备提取的 APK、反编译目录和临时工作文件不纳入 Git。
 
+LSPosed 的 system_server 作用域使用包名 `android`，已包含在 `scope.list`。`zte.com.cn.filter` 也已加入可选作用域；该包目前没有专用 Hook 适配器。
+
 ## 本地构建
 
 需要 JDK 17、Android SDK Platform 36 和网络连接以解析 Gradle 插件及依赖。

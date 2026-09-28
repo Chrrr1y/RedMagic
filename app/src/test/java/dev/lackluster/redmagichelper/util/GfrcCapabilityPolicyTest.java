@@ -8,7 +8,10 @@ public class GfrcCapabilityPolicyTest {
     @Test
     public void expandsEachPackedLimitIndependentlyToUltra() {
         assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(0));
+        assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(1));
+        assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(10));
         assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(11));
+        assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(20));
         assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(21));
         assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(12));
         assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(22));

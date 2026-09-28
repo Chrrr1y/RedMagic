@@ -29,7 +29,6 @@ import android.content.Intent
 import android.net.Uri
 import android.content.res.Resources
 import android.os.Build
-import android.util.TypedValue
 import androidx.compose.foundation.background
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -40,7 +39,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.layout.Arrangement
@@ -76,7 +74,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Typography
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
@@ -93,6 +94,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -114,10 +116,8 @@ import java.util.WeakHashMap
 /**
  * System-Native UI (com.android.settings) replacement for Browser Settings & Sub-Settings.
  * Styled to perfectly match RedMagic / Nubia OS system settings:
- * - Neutral soft background (#F1F2F6 light, #121212 dark)
- * - Pure white grouped card containers (18dp rounded corners)
- * - 0.5dp inset dividers between rows
- * - RedMagic red switches (#E53935)
+ * - System light/dark mode and Android dynamic color
+ * - System surface, content, outline, and accent color roles
  * - Crisp system typography and layout
  */
 object BrowserSettingsCompose {
@@ -125,29 +125,72 @@ object BrowserSettingsCompose {
     private val bridges = WeakHashMap<Activity, BrowserComposeBridge>()
     private val refreshNotifiers = WeakHashMap<Activity, () -> Unit>()
 
-    // --- System Settings (com.android.settings) Design Tokens ---
-    val SettingsBgLight = Color(0xFFF1F2F6) // Nubia/RedMagic Settings light background
-    val SettingsBgDark = Color(0xFF121212)  // Nubia/RedMagic Settings dark background
+    private var lightSystemColors = fallbackLightColorScheme()
+    private var darkSystemColors = fallbackDarkColorScheme()
+    private var currentSystemColors = lightSystemColors
 
-    val CardBgLight = Color(0xFFFFFFFF)     // Pure white card
-    val CardBgDark = Color(0xFF1E1E20)      // Neutral dark card
+    private val SettingsBgLight get() = lightSystemColors.surface
+    private val SettingsBgDark get() = darkSystemColors.surface
+    private val CardBgLight get() = lightSystemColors.surfaceVariant
+    private val CardBgDark get() = darkSystemColors.surfaceVariant
+    private val TextPrimaryLight get() = lightSystemColors.onSurface
+    private val TextPrimaryDark get() = darkSystemColors.onSurface
+    private val TextSecondaryLight get() = lightSystemColors.onSurfaceVariant
+    private val TextSecondaryDark get() = darkSystemColors.onSurfaceVariant
+    private val DividerLight get() = lightSystemColors.outlineVariant
+    private val DividerDark get() = darkSystemColors.outlineVariant
+    private val RedMagicRed get() = currentSystemColors.primary
+    private val SwitchTrackOffLight get() = lightSystemColors.surfaceVariant
+    private val SwitchTrackOffDark get() = darkSystemColors.surfaceVariant
+    private val ChevronLight get() = lightSystemColors.outline
+    private val ChevronDark get() = darkSystemColors.outline
 
-    val TextPrimaryLight = Color(0xFF1A1A1A)
-    val TextPrimaryDark = Color(0xFFF0F0F0)
+    private fun fallbackLightColorScheme() = lightColorScheme(
+        primary = Color(0xFFE53935),
+        onPrimary = Color.White,
+        background = Color(0xFFF1F2F6),
+        onBackground = Color(0xFF1A1A1A),
+        surface = Color(0xFFF1F2F6),
+        onSurface = Color(0xFF1A1A1A),
+        surfaceVariant = Color.White,
+        onSurfaceVariant = Color(0xFF8A8A8E),
+        outline = Color(0xFFC7C7CC),
+        outlineVariant = Color(0xFFEFEFEF)
+    )
 
-    val TextSecondaryLight = Color(0xFF8A8A8E)
-    val TextSecondaryDark = Color(0xFF8E8E93)
+    private fun fallbackDarkColorScheme() = darkColorScheme(
+        primary = Color(0xFFE53935),
+        onPrimary = Color.White,
+        background = Color(0xFF121212),
+        onBackground = Color(0xFFF0F0F0),
+        surface = Color(0xFF121212),
+        onSurface = Color(0xFFF0F0F0),
+        surfaceVariant = Color(0xFF1E1E20),
+        onSurfaceVariant = Color(0xFF8E8E93),
+        outline = Color(0xFF545458),
+        outlineVariant = Color(0xFF2C2C2E)
+    )
 
-    val DividerLight = Color(0xFFEFEFEF)
-    val DividerDark = Color(0xFF2C2C2E)
+    private fun systemColorSchemes(context: Context): Pair<ColorScheme, ColorScheme> {
+        val fallbackLight = fallbackLightColorScheme()
+        val fallbackDark = fallbackDarkColorScheme()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                return Pair(
+                    dynamicLightColorScheme(context),
+                    dynamicDarkColorScheme(context)
+                )
+            } catch (ignored: Throwable) {}
+        }
+        return Pair(fallbackLight, fallbackDark)
+    }
 
-    val RedMagicRed = Color(0xFFE53935)     // RedMagic accent red for switch track
-    val SwitchTrackOffLight = Color(0xFFE5E5EA)
-    val SwitchTrackOffDark = Color(0xFF39393D)
-    val SwitchThumb = Color(0xFFFFFFFF)
-
-    val ChevronLight = Color(0xFFC7C7CC)
-    val ChevronDark = Color(0xFF545458)
+    private fun isNightMode(uiMode: Int): Boolean? =
+        when (uiMode and Configuration.UI_MODE_NIGHT_MASK) {
+            Configuration.UI_MODE_NIGHT_YES -> true
+            Configuration.UI_MODE_NIGHT_NO -> false
+            else -> null
+        }
 
     class BrowserComposeBridge(val activity: Activity) :
         LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
@@ -430,77 +473,36 @@ object BrowserSettingsCompose {
 
     @JvmStatic
     fun isDarkTheme(activity: Activity? = null): Boolean {
-        // Strictly follow system dark mode (light vs dark)
-        try {
-            val systemUiMode = Resources.getSystem().configuration.uiMode
-            return (systemUiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-        } catch (ignored: Throwable) {}
+        val systemNightMode = try {
+            isNightMode(Resources.getSystem().configuration.uiMode)
+        } catch (ignored: Throwable) {
+            null
+        }
+        if (systemNightMode != null) return systemNightMode
 
         if (activity != null) {
             try {
-                val appUiMode = activity.applicationContext.resources.configuration.uiMode
-                return (appUiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+                return isNightMode(activity.resources.configuration.uiMode) ?: false
             } catch (ignored: Throwable) {}
         }
         return false
     }
 
-    fun getSystemAccentColor(context: Context): Color {
-        // 1. Android 12+ (API 31+) Monet system accent color
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                val colorInt = context.getColor(android.R.color.system_accent1_600)
-                if (colorInt != 0) return Color(colorInt)
-            } catch (ignored: Throwable) {}
-        }
-        // 2. Resolve ?android:attr/colorAccent from active theme
-        try {
-            val typedValue = TypedValue()
-            if (context.theme.resolveAttribute(android.R.attr.colorAccent, typedValue, true)) {
-                if (typedValue.type >= TypedValue.TYPE_FIRST_COLOR_INT && typedValue.type <= TypedValue.TYPE_LAST_COLOR_INT) {
-                    return Color(typedValue.data)
-                }
-            }
-        } catch (ignored: Throwable) {}
-        // 3. Fallback to RedMagic brand red
-        return RedMagicRed
-    }
-
     @Composable
     fun BrowserSettingsTheme(activity: Activity, content: @Composable () -> Unit) {
-        val isDark = isDarkTheme(activity)
+        val configuration = LocalConfiguration.current
+        val isDark = remember(configuration.uiMode) { isDarkTheme(activity) }
+        val schemes = remember(activity, configuration.uiMode, configuration.colorMode) {
+            systemColorSchemes(activity)
+        }
+        lightSystemColors = schemes.first
+        darkSystemColors = schemes.second
+        val colors = if (isDark) darkSystemColors else lightSystemColors
+        currentSystemColors = colors
 
-        DisposableEffect(isDark) {
+        DisposableEffect(isDark, colors.surface) {
             updateSystemBars(activity, isDark)
             onDispose {}
-        }
-
-        val systemAccent = remember(activity) { getSystemAccentColor(activity) }
-
-        val colors = if (isDark) {
-            darkColorScheme(
-                primary = systemAccent,
-                onPrimary = Color.White,
-                background = SettingsBgDark,
-                onBackground = TextPrimaryDark,
-                surface = SettingsBgDark,
-                onSurface = TextPrimaryDark,
-                surfaceVariant = CardBgDark,
-                onSurfaceVariant = TextSecondaryDark,
-                outline = DividerDark
-            )
-        } else {
-            lightColorScheme(
-                primary = systemAccent,
-                onPrimary = Color.White,
-                background = SettingsBgLight,
-                onBackground = TextPrimaryLight,
-                surface = SettingsBgLight,
-                onSurface = TextPrimaryLight,
-                surfaceVariant = CardBgLight,
-                onSurfaceVariant = TextSecondaryLight,
-                outline = DividerLight
-            )
         }
 
         MaterialTheme(
@@ -645,10 +647,10 @@ object BrowserSettingsCompose {
                 checked = isChecked,
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = SwitchThumb,
+                    checkedThumbColor = currentSystemColors.onPrimary,
                     checkedTrackColor = MaterialTheme.colorScheme.primary,
                     checkedBorderColor = Color.Transparent,
-                    uncheckedThumbColor = if (isDark) Color(0xFFB0B0B0) else SwitchThumb,
+                    uncheckedThumbColor = if (isDark) darkSystemColors.onSurfaceVariant else lightSystemColors.onPrimary,
                     uncheckedTrackColor = if (isDark) SwitchTrackOffDark else SwitchTrackOffLight,
                     uncheckedBorderColor = Color.Transparent
                 )
