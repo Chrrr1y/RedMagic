@@ -1,8 +1,9 @@
 package dev.lackluster.redmagichelper.hook;
 
 import android.content.SharedPreferences;
+import android.content.ContentResolver;
+import android.content.Context;
 import android.content.pm.ApplicationInfo;
-import android.util.Log;
 
 import java.lang.reflect.Method;
 
@@ -49,7 +50,8 @@ public final class HookEntry extends XposedModule {
 
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
-        HookLog.attach(this);
+        HookLog.attach(this, resolveContentResolver(
+                "system".equals(param.getProcessName())));
         HookLog.info("entry", "MODULE_LOADED process=" + param.getProcessName()
                 + " api=" + getApiVersion()
                 + " framework=" + getFrameworkName()
@@ -59,8 +61,8 @@ public final class HookEntry extends XposedModule {
 
     @Override
     public void onPackageReady(XposedModuleInterface.PackageReadyParam param) {
-        HookLog.attach(this);
         String packageName = normalizePackageName(param.getPackageName());
+        HookLog.attach(this, resolveContentResolver("android".equals(packageName)));
         boolean firstPackage = param.isFirstPackage();
         HookLog.info("entry", "PACKAGE_READY package=" + packageName
                 + " first=" + firstPackage);
@@ -80,7 +82,7 @@ public final class HookEntry extends XposedModule {
 
     @Override
     public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
-        HookLog.attach(this);
+        HookLog.attach(this, resolveContentResolver(true));
         refreshPreferences();
         rememberTarget("android", param.getClassLoader(), null);
         installForPackage("android", param.getClassLoader(), null);
@@ -94,12 +96,13 @@ public final class HookEntry extends XposedModule {
 
     @Override
     public void onHotReloaded(XposedModuleInterface.HotReloadedParam param) {
-        HookLog.attach(this);
+        HookLog.attach(this, resolveContentResolver(
+                "system".equals(param.getProcessName())));
         for (XposedInterface.HookHandle handle : param.getOldHookHandles()) {
             try {
                 handle.unhook();
             } catch (Throwable error) {
-                Log.w(HookLog.TAG, "hot reload unhook failed", error);
+                HookLog.error("entry", "HOT_RELOAD_UNHOOK_FAILED", error);
             }
         }
         refreshPreferences();
@@ -187,6 +190,8 @@ public final class HookEntry extends XposedModule {
         } catch (Throwable error) {
             HookLog.error(packageName, "ADAPTER_FAILED", error);
             session.unhookAll();
+        } finally {
+            session.logScanSummary();
         }
     }
 
@@ -236,6 +241,29 @@ public final class HookEntry extends XposedModule {
         lastPackageName = normalizePackageName(packageName);
         lastClassLoader = classLoader;
         lastApplicationInfo = applicationInfo;
+    }
+
+    private static ContentResolver resolveContentResolver(boolean allowSystemContext) {
+        try {
+            Class<?> activityThread = Class.forName("android.app.ActivityThread");
+            Object thread = activityThread.getMethod("currentActivityThread").invoke(null);
+            if (thread != null) {
+                Object application = activityThread.getMethod("getApplication").invoke(thread);
+                if (application instanceof Context) {
+                    return ((Context) application).getContentResolver();
+                }
+                if (allowSystemContext) {
+                    Object systemContext = activityThread.getMethod("getSystemContext")
+                            .invoke(thread);
+                    if (systemContext instanceof Context) {
+                        return ((Context) systemContext).getContentResolver();
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // The provider is optional while a process is still initializing.
+        }
+        return null;
     }
 
     private static String normalizePackageName(String packageName) {

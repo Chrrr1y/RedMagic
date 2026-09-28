@@ -33,6 +33,9 @@ public final class HookSession {
     private final ApplicationInfo applicationInfo;
     private final ModuleConfig config;
     private final List<XposedInterface.HookHandle> handles = new ArrayList<>();
+    private final AtomicInteger installedHooks = new AtomicInteger();
+    private final AtomicInteger missingCapabilities = new AtomicInteger();
+    private final AtomicInteger failedHooks = new AtomicInteger();
 
     public HookSession(
             XposedModule module,
@@ -72,7 +75,8 @@ public final class HookSession {
                 // Try the next build-specific candidate.
             }
         }
-        HookLog.missing(packageName, "class=" + String.join("|", candidates));
+        recordMissing("class_candidates=" + String.join("|", candidates)
+                + " classLoader=" + classLoaderName(classLoader));
         return null;
     }
 
@@ -171,7 +175,9 @@ public final class HookSession {
     public Method firstMethod(Class<?> type, String methodName, Class<?>... exactParameters) {
         List<Method> methods = findMethods(type, methodName, exactParameters);
         if (methods.isEmpty()) {
-            HookLog.missing(packageName, "method=" + typeName(type) + "#" + methodName);
+            if (type != null) {
+                logMissingMethod(type, new String[]{methodName}, exactParameters);
+            }
             return null;
         }
         return methods.get(0);
@@ -185,7 +191,9 @@ public final class HookSession {
     ) {
         List<Method> methods = findMethods(type, methodName, exactParameters);
         if (methods.isEmpty()) {
-            HookLog.missing(packageName, "method=" + typeName(type) + "#" + methodName);
+            if (type != null) {
+                logMissingMethod(type, new String[]{methodName}, exactParameters);
+            }
             return;
         }
         for (Method method : methods) {
@@ -206,7 +214,6 @@ public final class HookSession {
             Class<?>... exactParameters
     ) {
         if (type == null || methodNames == null) {
-            HookLog.missing(packageName, "method=<null>");
             return;
         }
         for (String methodName : methodNames) {
@@ -218,8 +225,7 @@ public final class HookSession {
                 return;
             }
         }
-        HookLog.missing(packageName, "method=" + typeName(type) + "#"
-                + String.join("|", methodNames));
+        logMissingMethod(type, methodNames, exactParameters);
     }
 
     public void hookFirst(
@@ -232,6 +238,70 @@ public final class HookSession {
         if (method != null) {
             hook(method, callback);
         }
+    }
+
+    private void logMissingMethod(
+            Class<?> type,
+            String[] methodNames,
+            Class<?>... exactParameters
+    ) {
+        StringBuilder requested = new StringBuilder();
+        for (String name : methodNames) {
+            if (requested.length() > 0) {
+                requested.append('|');
+            }
+            requested.append(typeName(type)).append('#').append(name)
+                    .append('(').append(parameterNames(exactParameters)).append(')');
+        }
+        recordMissing("target=" + typeName(type)
+                + " requested=" + requested
+                + " available_overloads=" + availableOverloads(type, methodNames));
+    }
+
+    private void recordMissing(String detail) {
+        missingCapabilities.incrementAndGet();
+        HookLog.missing(packageName, detail);
+    }
+
+    private static String parameterNames(Class<?>[] parameters) {
+        StringBuilder result = new StringBuilder();
+        for (Class<?> parameter : parameters) {
+            if (result.length() > 0) {
+                result.append(',');
+            }
+            result.append(parameter == null ? "<null>" : parameter.getTypeName());
+        }
+        return result.toString();
+    }
+
+    private static String availableOverloads(Class<?> type, String[] methodNames) {
+        if (type == null) {
+            return "<class-unavailable>";
+        }
+        List<String> overloads = new ArrayList<>();
+        try {
+            for (Class<?> current = type; current != null && overloads.size() < 12;
+                 current = current.getSuperclass()) {
+                for (Method method : current.getDeclaredMethods()) {
+                    for (String name : methodNames) {
+                        if (method.getName().equals(name)) {
+                            overloads.add(method.toGenericString());
+                            break;
+                        }
+                    }
+                    if (overloads.size() >= 12) {
+                        break;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+            // Keep the requested signature even if ART blocks enumeration.
+        }
+        return overloads.isEmpty() ? "<none>" : String.join(";", overloads);
+    }
+
+    private static String classLoaderName(ClassLoader loader) {
+        return loader == null ? "<bootstrap>" : loader.getClass().getName();
     }
 
     private static final AtomicInteger HOOK_SEQUENCE = new AtomicInteger();
@@ -270,8 +340,9 @@ public final class HookSession {
                     .setId(id)
                     .intercept(normalizedCallback::intercept);
             handles.add(handle);
-            HookLog.info(packageName, "HOOK_INSTALLED " + method);
+            installedHooks.incrementAndGet();
         } catch (Throwable error) {
+            failedHooks.incrementAndGet();
             HookLog.error(packageName, "HOOK_FAILED " + method, error);
         }
     }
@@ -281,7 +352,20 @@ public final class HookSession {
     }
 
     public void missing(String capability) {
-        HookLog.missing(packageName, capability);
+        recordMissing(capability);
+    }
+
+    public void logScanSummary() {
+        String apkPath = applicationInfo == null || applicationInfo.sourceDir == null
+                ? "<system-or-unavailable>" : applicationInfo.sourceDir;
+        int missing = missingCapabilities.get();
+        if (missing > 0) {
+            HookLog.warn(packageName, "HOOK_SCAN_CAPABILITY_WARNINGS missing=" + missing
+                    + "; details are in the helper app logs");
+        }
+        HookLog.info(packageName, "HOOK_SCAN_SUMMARY installed="
+                + installedHooks.get() + " missing=" + missing
+                + " failed=" + failedHooks.get() + " apk=" + apkPath);
     }
 
     public void unhookAll() {
@@ -340,6 +424,7 @@ public final class HookSession {
         if (context == null || config == null) {
             return;
         }
+        HookLog.attachContentResolver(context.getContentResolver());
         try {
             android.os.Bundle res = context.getContentResolver().call(
                     dev.lackluster.redmagichelper.config.ConfigProvider.CONTENT_URI,

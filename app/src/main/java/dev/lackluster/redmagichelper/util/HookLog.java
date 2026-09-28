@@ -1,25 +1,80 @@
 package dev.lackluster.redmagichelper.util;
 
+import android.content.ContentResolver;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.SystemClock;
 import android.util.Log;
+
+import java.util.ArrayList;
+import java.util.Locale;
+import java.util.Set;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import io.github.libxposed.api.XposedModule;
 
-/** Small logger that also works when the module is running inside a system process. */
+/** Routes hook diagnostics to the helper app and keeps LSPosed output actionable. */
 public final class HookLog {
     public static final String TAG = "RMH_REWRITE";
+    private static final String PROVIDER_AUTHORITY =
+            "content://dev.lackluster.redmagichelper.config_provider";
+    private static final Uri PROVIDER_URI = Uri.parse(PROVIDER_AUTHORITY);
+    private static final int BATCH_SIZE = 32;
+    private static final int MAX_LOG_LINE_LENGTH = 4096;
+    private static final long INFO_DUPLICATE_WINDOW_MS = 5000L;
+    private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter
+            .ofPattern("HH:mm:ss", Locale.getDefault())
+            .withZone(ZoneId.systemDefault());
+
+    private static final ArrayBlockingQueue<String> INTERNAL_QUEUE =
+            new ArrayBlockingQueue<>(512);
+    private static final AtomicBoolean DRAIN_SCHEDULED = new AtomicBoolean();
+    private static final Set<String> FRAMEWORK_WARNINGS = ConcurrentHashMap.newKeySet();
+    private static final ConcurrentHashMap<String, Long> RECENT_INFO_EVENTS =
+            new ConcurrentHashMap<>();
+    private static final AtomicBoolean PROVIDER_ERROR_REPORTED = new AtomicBoolean();
+    private static final AtomicInteger DROPPED_LOG_EVENTS = new AtomicInteger();
+    private static final ExecutorService LOG_EXECUTOR = Executors.newSingleThreadExecutor(
+            new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "RMH-HookLog");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
 
     private static volatile XposedModule framework;
+    private static volatile ContentResolver contentResolver;
 
     private HookLog() {
     }
 
-    /**
-     * Keep a framework logger in addition to Android's log buffer.  On newer
-     * Android builds the shell may not be allowed to read an application's
-     * main log buffer, while the LSPosed log remains available for diagnosis.
-     */
     public static void attach(XposedModule module) {
-        framework = module;
+        attach(module, null);
+    }
+
+    public static void attach(XposedModule module, ContentResolver resolver) {
+        if (module != null) {
+            framework = module;
+        }
+        attachContentResolver(resolver);
+    }
+
+    public static void attachContentResolver(ContentResolver resolver) {
+        if (resolver != null) {
+            contentResolver = resolver;
+            scheduleDrain();
+        }
     }
 
     public static void debug(String component, String message) {
@@ -77,19 +132,44 @@ public final class HookLog {
         }
     }
 
-    private static void write(int priority, String component, String message, Throwable error) {
-        String time = new java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(new java.util.Date());
-        String level = getLevelString(priority);
-        String feature = getFriendlyFeature(component);
-        String line = "[" + time + "][" + level + "][" + feature + "][" + message + "]";
-        if (error == null) {
+    private static void write(
+            int priority,
+            String component,
+            String message,
+            Throwable error
+    ) {
+        if (priority == Log.INFO && !shouldLogInfo(component, message)) {
+            return;
+        }
+        String time = TIME_FORMAT.format(Instant.ofEpochMilli(System.currentTimeMillis()));
+        String detail = message == null ? "" : message;
+        if (error != null) {
+            detail += " error=" + HookLogFormatter.compactError(error);
+        }
+        String line = HookLogFormatter.format(
+                time, getLevelString(priority), getFriendlyFeature(component),
+                component, detail);
+        if (line.length() > MAX_LOG_LINE_LENGTH) {
+            line = line.substring(0, MAX_LOG_LINE_LENGTH);
+        }
+        enqueueInternal(line);
+
+        if (priority >= Log.ERROR) {
             Log.println(priority, TAG, line);
-        } else {
-            Log.println(priority, TAG, line + "\n" + Log.getStackTraceString(error));
+        }
+        if (priority < Log.WARN) {
+            return;
         }
 
         XposedModule current = framework;
         if (current == null) {
+            return;
+        }
+        if (priority == Log.WARN
+                && !detail.startsWith("HOOK_SCAN_CAPABILITY_WARNINGS")) {
+            return;
+        }
+        if (priority == Log.WARN && !FRAMEWORK_WARNINGS.add(component + "\n" + detail)) {
             return;
         }
         try {
@@ -100,6 +180,103 @@ public final class HookLog {
             }
         } catch (Throwable ignored) {
             // Logging must never prevent a host hook from being installed.
+        }
+    }
+
+    private static void enqueueInternal(String line) {
+        if (contentResolver == null) {
+            return;
+        }
+        if (!INTERNAL_QUEUE.offer(line)) {
+            DROPPED_LOG_EVENTS.incrementAndGet();
+            return;
+        }
+        scheduleDrain();
+    }
+
+    private static boolean shouldLogInfo(String component, String message) {
+        long now = SystemClock.elapsedRealtime();
+        String key = String.valueOf(component) + '\n' + String.valueOf(message);
+        AtomicBoolean accepted = new AtomicBoolean();
+        RECENT_INFO_EVENTS.compute(key, (ignored, previous) -> {
+            if (previous == null || now - previous >= INFO_DUPLICATE_WINDOW_MS) {
+                accepted.set(true);
+                return now;
+            }
+            return previous;
+        });
+        if (RECENT_INFO_EVENTS.size() > 512) {
+            RECENT_INFO_EVENTS.clear();
+        }
+        return accepted.get();
+    }
+
+    private static void scheduleDrain() {
+        if (contentResolver != null && DRAIN_SCHEDULED.compareAndSet(false, true)) {
+            LOG_EXECUTOR.execute(HookLog::drainQueue);
+        }
+    }
+
+    private static void drainQueue() {
+        try {
+            SystemClock.sleep(100L);
+            while (contentResolver != null && !INTERNAL_QUEUE.isEmpty()) {
+                ArrayList<String> batch = new ArrayList<>(BATCH_SIZE);
+                INTERNAL_QUEUE.drainTo(batch, BATCH_SIZE);
+                if (batch.isEmpty()) {
+                    break;
+                }
+                Bundle extras = new Bundle();
+                extras.putStringArrayList("lines", batch);
+                String failure = "provider unavailable";
+                boolean stored = false;
+                for (int attempt = 0; attempt < 4 && !stored; attempt++) {
+                    try {
+                        ContentResolver resolver = contentResolver;
+                        if (resolver == null) {
+                            failure = "resolver unavailable";
+                            break;
+                        }
+                        Bundle result = resolver.call(
+                                PROVIDER_URI, "appendHookLogs", null, extras);
+                        if (result != null && result.getBoolean("success", false)) {
+                            stored = true;
+                        } else {
+                            failure = result == null ? "empty provider response"
+                                    : result.getString("error", "write rejected");
+                        }
+                    } catch (Throwable error) {
+                        failure = HookLogFormatter.compactError(error);
+                    }
+                    if (!stored && attempt < 3) {
+                        SystemClock.sleep(200L * (attempt + 1));
+                    }
+                }
+                if (!stored) {
+                    reportProviderFailure(failure);
+                }
+            }
+        } finally {
+            int dropped = DROPPED_LOG_EVENTS.getAndSet(0);
+            if (dropped > 0) {
+                String summary = HookLogFormatter.format(
+                        TIME_FORMAT.format(Instant.ofEpochMilli(System.currentTimeMillis())),
+                        "WARN", "日志系统", "logger",
+                        "LOG_EVENTS_DROPPED count=" + dropped);
+                if (!INTERNAL_QUEUE.offer(summary)) {
+                    DROPPED_LOG_EVENTS.addAndGet(dropped);
+                }
+            }
+            DRAIN_SCHEDULED.set(false);
+            if (!INTERNAL_QUEUE.isEmpty()) {
+                scheduleDrain();
+            }
+        }
+    }
+
+    private static void reportProviderFailure(String detail) {
+        if (PROVIDER_ERROR_REPORTED.compareAndSet(false, true)) {
+            Log.w(TAG, "internal hook log provider write failed: " + detail);
         }
     }
 }

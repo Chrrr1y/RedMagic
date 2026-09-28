@@ -2081,7 +2081,7 @@ private fun generateInternalAdaptationLogs(
         val ga = inspectPackage(context, "cn.nubia.gameassist", "游戏助手")
         moduleCount++
         if (ga.isInstalled) {
-            emit("INFO", "通用与游戏", "核心组件 cn.nubia.gameassist 适配就绪 (v${ga.versionName}, code: ${ga.versionCode}, ${if (ga.isPrivileged) "特权应用" else if (ga.isSystemApp) "系统预装" else "普通应用"})")
+            emit("INFO", "通用与游戏", "APK 已安装: cn.nubia.gameassist (v${ga.versionName}, code: ${ga.versionCode}, ${if (ga.isPrivileged) "特权应用" else if (ga.isSystemApp) "系统预装" else "普通应用"}); Hook 结果见运行日志")
             emit("DEBUG", "通用与游戏", "组件安装路径: ${ga.sourceDir}")
             emit(if (readBoolean(preferences, "game_fuction_unfreeze_switch", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏功能限制解锁 = ${formatState("game_fuction_unfreeze_switch")}")
             emit(if (readBoolean(preferences, "game_force_overlay_capability", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 允许第三方悬浮窗 = ${formatState("game_force_overlay_capability")}")
@@ -2093,11 +2093,6 @@ private fun generateInternalAdaptationLogs(
             emit(if (readBoolean(preferences, "acive_mode_switch", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏空间主动模式解锁 = ${formatState("acive_mode_switch")}")
             emit(if (readBoolean(preferences, "game_super_resolution_unlimited_apps", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 超境模式允许所有应用 = ${formatState("game_super_resolution_unlimited_apps")}")
             emit(if (readBoolean(preferences, "game_space_combo_speed_enabled", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏连招加速 = ${formatState("game_space_combo_speed_enabled")} (倍率: ${readNumber(preferences, "game_space_combo_speed_rate", 1)}x)")
-            emit("DEBUG", "通用与游戏", "Hook 锚点: cn.nubia.gameassist.plugin.tiles.RangeLineTile.C0() 注入包名")
-            emit("DEBUG", "通用与游戏", "Hook 锚点: VoiceControllerTile.S() 解除变声机型与画中画限制")
-            emit("DEBUG", "通用与游戏", "Hook 锚点: SoundEffectTile.S() 解除 DTS/杜比游戏音效机型限制")
-            emit("DEBUG", "通用与游戏", "Hook 锚点: SightAssistTile.S() 解除准星辅助限制")
-            emit("DEBUG", "通用与游戏", "Hook 锚点: SuperResolutionViewController.x() 绕过内置白名单")
         } else {
             emit("WARN", "通用与游戏", "未检测到核心组件 cn.nubia.gameassist 安装，跳过游戏助手相关 Hook")
         }
@@ -2105,10 +2100,7 @@ private fun generateInternalAdaptationLogs(
         val ghl = inspectPackage(context, "cn.nubia.gamehelperline", "辅助线服务")
         moduleCount++
         if (ghl.isInstalled) {
-            emit("INFO", "通用与游戏", "辅助线服务 cn.nubia.gamehelperline 已就绪 (v${ghl.versionName}, code: ${ghl.versionCode})")
-            emit("DEBUG", "通用与游戏", "Hook 锚点: LineService.isLineNotSupported() 强制放行")
-            emit("DEBUG", "通用与游戏", "Hook 锚点: BlacklistUtils.isDisableRangeLine() 绕过王者荣耀黑名单")
-            emit("DEBUG", "通用与游戏", "Hook 锚点: Settings.canDrawOverlays() 强制返回 true 放行悬浮窗")
+            emit("INFO", "通用与游戏", "APK 已安装: cn.nubia.gamehelperline (v${ghl.versionName}, code: ${ghl.versionCode}); Hook 结果见运行日志")
         } else {
             emit("WARN", "通用与游戏", "未检测到辅助线服务 cn.nubia.gamehelperline 安装")
         }
@@ -2121,8 +2113,6 @@ private fun generateInternalAdaptationLogs(
         emit(if (readBoolean(preferences, "ai_trigger_switch", false)) "INFO" else "DEBUG", "通用与游戏", "开关: AI/插件触发加速 = ${formatState("ai_trigger_switch")}")
         emit(if (readBoolean(preferences, "double_any_app", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 允许双开任意应用 = ${formatState("double_any_app")}")
         emit(if (readBoolean(preferences, "rm_low_memory_limit", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 移除双开低内存限制 = ${formatState("rm_low_memory_limit")}")
-        emit("DEBUG", "通用与游戏", "Hook 锚点: FeatureUtil.supportGameKey() 强制返回 true")
-        emit("DEBUG", "通用与游戏", "Hook 锚点: TriggerService 动态注入加速配置")
     }
 
     // 2. BROWSER
@@ -2130,7 +2120,7 @@ private fun generateInternalAdaptationLogs(
         val br = inspectPackage(context, "cn.nubia.browser", "努比亚浏览器")
         moduleCount++
         if (br.isInstalled) {
-            emit("INFO", "浏览器适配", "核心组件 cn.nubia.browser 适配就绪 (v${br.versionName}, code: ${br.versionCode})")
+            emit("INFO", "浏览器适配", "APK 已安装: cn.nubia.browser (v${br.versionName}, code: ${br.versionCode}); Hook 结果见运行日志")
             emit("DEBUG", "浏览器适配", "安装路径: ${br.sourceDir}")
             emit(if (readBoolean(preferences, "browser_open_search", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 浏览器启动时打开搜索页 = ${formatState("browser_open_search")}")
             emit(if (readBoolean(preferences, "browser_skip_splash", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 跳过浏览器启动广告 = ${formatState("browser_skip_splash")}")
@@ -2139,10 +2129,6 @@ private fun generateInternalAdaptationLogs(
             emit(if (readBoolean(preferences, "browser_slim_mine", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 删除常用服务与短剧 = ${formatState("browser_slim_mine")}")
             emit(if (readBoolean(preferences, "browser_remove_hot_words", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 删除搜索页热门短剧 = ${formatState("browser_remove_hot_words")}")
             emit(if (readBoolean(preferences, "browser_remove_search_shortcuts", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 删除搜索框下方快捷图标 = ${formatState("browser_remove_search_shortcuts")}")
-            emit("DEBUG", "浏览器适配", "Hook 锚点: BrowserLauncher.onCreate() 劫持启动直达纯净搜索页")
-            emit("DEBUG", "浏览器适配", "Hook 锚点: SplashAdManager / TTAdSdk 阻断开屏和穿山甲广告")
-            emit("DEBUG", "浏览器适配", "Hook 锚点: BottomBar 隐藏 cont_news / cont_video")
-            emit("DEBUG", "浏览器适配", "Hook 锚点: 搜索界面 active 容器替换为空并保持原始占位高度 (View.INVISIBLE)")
         } else {
             emit("WARN", "浏览器适配", "未检测到努比亚浏览器 cn.nubia.browser 安装")
         }
@@ -2152,7 +2138,7 @@ private fun generateInternalAdaptationLogs(
     if (filter == LogFilter.ALL || filter == LogFilter.SYSTEM) {
         val sui = inspectPackage(context, "com.android.systemui", "系统界面")
         moduleCount++
-        emit("INFO", "系统界面", "核心服务 com.android.systemui 策略已就绪 (${if (sui.isInstalled) "v${sui.versionName}, code: ${sui.versionCode}" else "常驻核心服务"})")
+        emit("INFO", "系统界面", "SystemUI APK 状态: ${if (sui.isInstalled) "v${sui.versionName}, code: ${sui.versionCode}" else "常驻核心服务"}; Hook 结果见运行日志")
         emit(if (readBoolean(preferences, "statusbar_clock_show_seconds", false)) "INFO" else "DEBUG", "系统界面", "开关: 状态栏时钟显示秒数 = ${formatState("statusbar_clock_show_seconds")}")
         emit(if (readBoolean(preferences, "statusbar_clock_pull_down_show_period", false)) "INFO" else "DEBUG", "系统界面", "开关: 状态栏时钟显示中文时段 = ${formatState("statusbar_clock_pull_down_show_period")}")
         emit(if (readBoolean(preferences, "systemui_screen_off_show_seconds", false)) "INFO" else "DEBUG", "系统界面", "开关: 息屏显示秒数 = ${formatState("systemui_screen_off_show_seconds")}")
@@ -2161,18 +2147,13 @@ private fun generateInternalAdaptationLogs(
         emit(if (readBoolean(preferences, "volume_disable_safety_warning", false)) "INFO" else "DEBUG", "系统界面", "开关: 禁用安全音量提示 = ${formatState("volume_disable_safety_warning")}")
         emit(if (readBoolean(preferences, "disable_flag_secure", false)) "INFO" else "DEBUG", "系统界面", "开关: 屏幕录制忽略 FLAG_SECURE = ${formatState("disable_flag_secure")}")
         emit(if (readBoolean(preferences, "statusbar_notif_max", false)) "INFO" else "DEBUG", "系统界面", "开关: 状态栏通知图标数量限制 = ${formatState("statusbar_notif_max")} (${readNumber(preferences, "statusbar_notif_max_value", 10)} 个)")
-        emit("DEBUG", "系统界面", "Hook 锚点: Clock.updateClock() 动态重写秒数与中文时段")
-        emit("DEBUG", "系统界面", "Hook 锚点: PhoneStatusBarView.updateNotificationIcons() 控制最大通知数")
 
         moduleCount++
-        emit("INFO", "系统核心", "宿主 android (system_server 进程) 核心策略已注入")
+        emit("INFO", "系统核心", "system_server 宿主已扫描；实际 Hook 状态以运行时事件为准")
         emit(if (readBoolean(preferences, "remove_restrictions_window", false)) "INFO" else "DEBUG", "系统核心", "开关: 允许所有应用使用小窗 = ${formatState("remove_restrictions_window")}")
         emit(if (readBoolean(preferences, "remove_restrictions_window_number", false)) "INFO" else "DEBUG", "系统核心", "开关: 窗口回复图标数量限制 = ${formatState("remove_restrictions_window_number")}")
         emit(if (readBoolean(preferences, "android_remove_intent_hijack_content", false)) "INFO" else "DEBUG", "系统核心", "开关: 意图劫持兼容 = ${formatState("android_remove_intent_hijack_content")}")
         emit(if (readBoolean(preferences, "system_framework_lock_screen_timeout", false)) "INFO" else "DEBUG", "系统核心", "开关: 系统锁屏超时改写 = ${formatState("system_framework_lock_screen_timeout")} (${readNumber(preferences, "system_framework_lock_screen_timeout_value", 10)} 分钟)")
-        emit("DEBUG", "系统核心", "Hook 锚点: AppOpsService.checkOperation(24) 强制放行悬浮窗")
-        emit("DEBUG", "系统核心", "Hook 锚点: WindowState.isSecureLocked() 忽略 FLAG_SECURE 允许截图录屏")
-        emit("DEBUG", "系统核心", "Hook 锚点: SoundDoseHelper.checkSafeMediaVolume() 禁用大音量安全警告")
 
         val set = inspectPackage(context, "com.android.settings", "系统设置")
         val pkgInst = inspectPackage(context, "com.android.packageinstaller", "软件包安装程序")
@@ -2206,11 +2187,6 @@ private fun generateInternalAdaptationLogs(
         emit(if (readBoolean(preferences, "beautify_skip_splash_ads", false)) "INFO" else "DEBUG", "桌面与个性化", "开关: 主题启动页跳过广告 = ${formatState("beautify_skip_splash_ads")}")
         emit(if (readBoolean(preferences, "allow_thirdparty_launcher", false)) "INFO" else "DEBUG", "桌面与个性化", "开关: 允许第三方桌面 = ${formatState("allow_thirdparty_launcher")}")
         emit(if (readBoolean(preferences, "system_time_component_desktop_switch", false)) "INFO" else "DEBUG", "桌面与个性化", "开关: 桌面时钟适配 = ${formatState("system_time_component_desktop_switch")}")
-        emit("DEBUG", "桌面与个性化", "Hook 锚点: ZteAccountManager.getCurrentUserInfo() 模拟登录态 (isLogined -> true)")
-        emit("DEBUG", "桌面与个性化", "Hook 锚点: Bean.isFree() -> true, Bean.getIsPay() -> 1, Bean.getIsCharge() -> false")
-        emit("DEBUG", "桌面与个性化", "Hook 锚点: Bean.isOnlineFreeTheme() -> true, Bean.isTimeLimitFree() -> true")
-        emit("DEBUG", "桌面与个性化", "Hook 锚点: BeautyPreviewActivity.getPayStateOfBean() -> 1")
-        emit("DEBUG", "桌面与个性化", "Hook 锚点: BeautyPreviewActivity.ResourceDownload() 自动进入免费下载通道")
 
         emit("INFO", "MTP分类浏览", "组件 cn.nubia.filebrowser 就绪 (${if (fb.isInstalled) "v${fb.versionName}" else "未安装"})")
         emit(if (readBoolean(preferences, "hide_mtp_category_browse", false)) "INFO" else "DEBUG", "MTP分类浏览", "开关: 隐藏 MTP 分类浏览 = ${formatState("hide_mtp_category_browse")}")
@@ -2219,6 +2195,15 @@ private fun generateInternalAdaptationLogs(
         emit("INFO", "NFC服务", "组件 com.android.nfc 就绪 (${if (nfc.isInstalled) "v${nfc.versionName}" else "未安装"})")
         emit(if (readBoolean(preferences, "mute_nfc_sound", false)) "INFO" else "DEBUG", "NFC服务", "开关: NFC 静音 = ${formatState("mute_nfc_sound")}")
         emit(if (readBoolean(preferences, "nfc_allow_screen_off_recognition", false)) "INFO" else "DEBUG", "NFC服务", "开关: 允许熄屏识别 NFC = ${formatState("nfc_allow_screen_off_recognition")}")
+    }
+
+    val runtimeHookLogs = readHookRuntimeLogs(context)
+        .filter { matchesHookLogFilter(it, filter) }
+    if (runtimeHookLogs.isEmpty()) {
+        emit("INFO", "Hook运行日志", "当前筛选下暂无运行时 Hook 记录")
+    } else {
+        emit("INFO", "Hook运行日志", "读取到 ${runtimeHookLogs.size} 条真实 Hook 进程记录")
+        lines.addAll(runtimeHookLogs)
     }
 
     val recentLogs = AppLogger.getRecentLogs()
@@ -2240,4 +2225,31 @@ private fun generateInternalAdaptationLogs(
         rawOutput = lines.joinToString("\n"),
         lines = lines
     )
+}
+
+private fun readHookRuntimeLogs(context: Context): List<String> {
+    return try {
+        val result = context.contentResolver.call(
+            dev.lackluster.redmagichelper.config.ConfigProvider.CONTENT_URI,
+            "getHookLogs",
+            null,
+            null
+        ) ?: return emptyList()
+        if (!result.getBoolean("success", false)) return emptyList()
+        result.getStringArrayList("lines")?.toList().orEmpty()
+    } catch (_: Throwable) {
+        emptyList()
+    }
+}
+
+private fun matchesHookLogFilter(line: String, filter: LogFilter): Boolean {
+    if (filter == LogFilter.ALL) return true
+    val isGaming = line.contains("[游戏优化]")
+    val isBrowser = line.contains("[浏览器适配]")
+    return when (filter) {
+        LogFilter.ALL -> true
+        LogFilter.GAMING -> isGaming
+        LogFilter.BROWSER -> isBrowser
+        LogFilter.SYSTEM -> !isGaming && !isBrowser
+    }
 }
