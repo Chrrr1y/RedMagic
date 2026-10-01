@@ -1676,6 +1676,9 @@ private fun LockScreenFontSettingsScreen(
     var masterEnabled by remember(revision) {
         mutableStateOf(readBoolean(preferences, "lockscreen_custom_font_switch", false))
     }
+    var ignoreThemeLayout by remember(revision) {
+        mutableStateOf(readBoolean(preferences, "lockscreen_ignore_theme_layout", false))
+    }
     var systemFontPath by remember(revision) {
         mutableStateOf(readText(preferences, "lockscreen_system_font_path", ""))
     }
@@ -1846,6 +1849,51 @@ private fun LockScreenFontSettingsScreen(
                             checkedThumbColor = colors.onPrimary,
                             checkedTrackColor = colors.primary
                         )
+                    )
+                }
+            }
+        }
+
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                color = if (ignoreThemeLayout) colors.secondaryContainer
+                else colors.surfaceContainerLow
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "无视主题锁屏布局",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (ignoreThemeLayout) colors.onSecondaryContainer
+                            else colors.onSurface
+                        )
+                        Text(
+                            text = "日期、农历、时间、天气水平居中，整体垂直居中，签名固定底部",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (ignoreThemeLayout) colors.onSecondaryContainer
+                            else colors.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = ignoreThemeLayout,
+                        onCheckedChange = { enabled ->
+                            val oldValue = ignoreThemeLayout
+                            ignoreThemeLayout = enabled
+                            preferences.edit()
+                                .putBoolean("lockscreen_ignore_theme_layout", enabled)
+                                .commit()
+                            onPreferenceChanged(
+                                "lockscreen_ignore_theme_layout", oldValue, enabled
+                            )
+                        }
                     )
                 }
             }
@@ -2820,6 +2868,7 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
     "lockscreen_custom_font_weight",
     "lockscreen_custom_font_size",
     "lockscreen_custom_date_size",
+    "lockscreen_ignore_theme_layout",
     "statusbar_notif_max",
     "statusbar_notif_max_value",
     "remove_alert_windows_notification",
