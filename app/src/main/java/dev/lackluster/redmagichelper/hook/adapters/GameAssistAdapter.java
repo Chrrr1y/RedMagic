@@ -249,8 +249,8 @@ public final class GameAssistAdapter implements HostAdapter {
             Class<?> superResolution = session.findOptionalClass(
                     "cn.nubia.plugin.superresolution.SuperResolutionViewController");
             if (superResolution != null) {
-                // E(int) is the final capability split consumed by the OEM
-                // controller: tens = interpolation tier, ones = image tier.
+                // E(int) is parsed as decimal limits: tens caps image quality,
+                // ones caps frame rate. G() clamps the saved tier to each cap.
                 // Widen this boundary too so a stale/cached upstream cap cannot
                 // collapse frameRate_ultra back to frameRate_super.
                 session.hook(superResolution, "E", chain -> {

@@ -10,9 +10,16 @@ import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.Bundle
+import android.graphics.Typeface
+import android.net.Uri
+import android.provider.OpenableColumns
+import java.io.File
+import kotlin.math.roundToInt
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -131,19 +138,19 @@ import kotlinx.coroutines.withContext
  * Stores live console events in an in-memory ring buffer without filesystem IO.
  */
 object AppLogger {
-    private val buffer = ArrayDeque<String>(200)
+    private val buffer = ArrayDeque<String>(500)
 
     init {
-        log("INFO", "诊断引擎", "RedMagic Helper 适配诊断引擎已就绪 (v4.0.0)")
+        log("INFO", "诊断引擎", "RedMagic Helper 适配诊断引擎已就绪 (v4.0.1)")
         log("INFO", "系统环境", "运行架构: ${Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"} | Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
     }
 
     @JvmStatic
     @Synchronized
     fun log(level: String, function: String, detail: String) {
-        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+        val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
         val entry = "[$time][$level][$function][$detail]"
-        if (buffer.size >= 200) {
+        if (buffer.size >= 500) {
             buffer.removeFirst()
         }
         buffer.add(entry)
@@ -153,6 +160,12 @@ object AppLogger {
     @Synchronized
     fun log(tag: String, message: String) {
         log("INFO", tag, message)
+    }
+
+    @JvmStatic
+    @Synchronized
+    fun clear() {
+        buffer.clear()
     }
 
     @JvmStatic
@@ -316,8 +329,11 @@ private fun MainAppScreen(preferences: SharedPreferences) {
         SettingCategory.values().firstOrNull { it.name == name }
     }
 
+    var currentSubScreenKey by remember { mutableStateOf<String?>(null) }
     var onRefreshLogsAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var onExportLogsAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var onDeleteLogsAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var showDeleteLogsDialog by remember { mutableStateOf(false) }
 
     val triggerToast: (String) -> Unit = { msg ->
         toastMessage = msg
@@ -392,7 +408,11 @@ private fun MainAppScreen(preferences: SharedPreferences) {
         }
     }
 
-    BackHandler(enabled = selectedCategory != null) {
+    BackHandler(enabled = currentSubScreenKey != null) {
+        currentSubScreenKey = null
+    }
+
+    BackHandler(enabled = currentSubScreenKey == null && selectedCategory != null) {
         selectedCategoryName = null
     }
 
@@ -403,12 +423,18 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                 TopAppBar(
                     navigationIcon = {
                         AnimatedVisibility(
-                            visible = selectedCategory != null,
+                            visible = currentSubScreenKey != null || selectedCategory != null,
                             enter = fadeIn(tween(200)) + expandHorizontally(tween(200)),
                             exit = fadeOut(tween(200)) + shrinkHorizontally(tween(200))
                         ) {
                             IconButton(
-                                onClick = { selectedCategoryName = null },
+                                onClick = {
+                                    if (currentSubScreenKey != null) {
+                                        currentSubScreenKey = null
+                                    } else {
+                                        selectedCategoryName = null
+                                    }
+                                },
                                 modifier = Modifier.size(48.dp)
                             ) {
                                 Icon(
@@ -421,8 +447,13 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                         }
                     },
                     title = {
+                        val headerTitle = when {
+                            currentSubScreenKey == "lockscreen_custom_font_settings" -> "锁屏时钟自定义字体"
+                            selectedCategory != null -> selectedCategory.title
+                            else -> "红魔助手"
+                        }
                         AnimatedContent(
-                            targetState = selectedCategory?.title ?: "红魔助手",
+                            targetState = headerTitle,
                             contentAlignment = Alignment.CenterStart,
                             transitionSpec = {
                                 if (targetState == "红魔助手") {
@@ -446,10 +477,10 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                         }
                     },
                     actions = {
-                        if (selectedTab == MainNavTab.LOGS && selectedCategory == null) {
+                        if (selectedTab == MainNavTab.LOGS && selectedCategory == null && currentSubScreenKey == null) {
                             TextButton(
                                 onClick = { onRefreshLogsAction?.invoke() },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
                             ) {
                                 Icon(
                                     painter = painterResource(R.drawable.ic_restart_alt),
@@ -457,12 +488,12 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                                     modifier = Modifier.size(18.dp),
                                     tint = colors.primary
                                 )
-                                Spacer(Modifier.width(4.dp))
-                                Text("刷新", color = colors.primary, style = MaterialTheme.typography.labelLarge)
+                                Spacer(Modifier.width(2.dp))
+                                Text("刷新", color = colors.primary, style = MaterialTheme.typography.labelMedium)
                             }
                             TextButton(
                                 onClick = { onExportLogsAction?.invoke() },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
                             ) {
                                 Icon(
                                     painter = painterResource(R.drawable.ic_share),
@@ -470,8 +501,21 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                                     modifier = Modifier.size(18.dp),
                                     tint = colors.primary
                                 )
-                                Spacer(Modifier.width(4.dp))
-                                Text("导出", color = colors.primary, style = MaterialTheme.typography.labelLarge)
+                                Spacer(Modifier.width(2.dp))
+                                Text("导出", color = colors.primary, style = MaterialTheme.typography.labelMedium)
+                            }
+                            TextButton(
+                                onClick = { showDeleteLogsDialog = true },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_delete),
+                                    contentDescription = "删除",
+                                    modifier = Modifier.size(18.dp),
+                                    tint = colors.error
+                                )
+                                Spacer(Modifier.width(2.dp))
+                                Text("删除", color = colors.error, style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     },
@@ -484,7 +528,7 @@ private fun MainAppScreen(preferences: SharedPreferences) {
             },
             bottomBar = {
                 AnimatedVisibility(
-                    visible = selectedCategory == null,
+                    visible = selectedCategory == null && currentSubScreenKey == null,
                     enter = slideInVertically(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)) { it },
                     exit = slideOutVertically(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)) { it }
                 ) {
@@ -540,7 +584,7 @@ private fun MainAppScreen(preferences: SharedPreferences) {
             ) {
                 // Screen Transitions
                 AnimatedContent(
-                    targetState = selectedCategory,
+                    targetState = currentSubScreenKey ?: selectedCategory?.name,
                     transitionSpec = {
                         val motion = tween<androidx.compose.ui.unit.IntOffset>(300)
                         if (targetState == null) {
@@ -556,13 +600,23 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                         }
                     },
                     label = "category-navigation"
-                ) { category ->
-                    if (category != null) {
+                ) { screenKey ->
+                    if (screenKey == "lockscreen_custom_font_settings") {
+                        LockScreenFontSettingsScreen(
+                            preferences = preferences,
+                            revision = preferenceRevision,
+                            onPreferenceChanged = handlePreferenceChanged,
+                            onTriggerToast = triggerToast
+                        )
+                    } else if (selectedCategory != null) {
                         CategoryDetailView(
                             preferences = preferences,
-                            category = category,
+                            category = selectedCategory,
                             revision = preferenceRevision,
-                            onPreferenceChanged = handlePreferenceChanged
+                            onPreferenceChanged = handlePreferenceChanged,
+                            onActionClick = { actionKey ->
+                                currentSubScreenKey = actionKey
+                            }
                         )
                     } else {
                         when (selectedTab) {
@@ -577,9 +631,10 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                                 LogsScreen(
                                     preferences = preferences,
                                     onTriggerToast = triggerToast,
-                                    onRegisterActions = { refresh, export ->
+                                    onRegisterActions = { refresh, export, delete ->
                                         onRefreshLogsAction = refresh
                                         onExportLogsAction = export
+                                        onDeleteLogsAction = delete
                                     }
                                 )
                             }
@@ -655,6 +710,30 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                     )
                 }
             }
+        }
+
+        if (showDeleteLogsDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteLogsDialog = false },
+                title = { Text("清空运行与适配日志") },
+                text = { Text("确定要删除所有运行日志与跨进程 Hook 记录吗？清空后不可恢复。") },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showDeleteLogsDialog = false
+                            onDeleteLogsAction?.invoke()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.error)
+                    ) {
+                        Text("清空")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteLogsDialog = false }) {
+                        Text("取消")
+                    }
+                }
+            )
         }
 
         // Full-screen loading scrim covering topBar ("红魔助手") and bottomBar ("首页", "日志", "关于")
@@ -1048,7 +1127,8 @@ private fun CategoryDetailView(
     preferences: SharedPreferences,
     category: SettingCategory,
     revision: Int,
-    onPreferenceChanged: (String, Any?, Any?) -> Unit
+    onPreferenceChanged: (String, Any?, Any?) -> Unit,
+    onActionClick: (String) -> Unit = {}
 ) {
     val colors = MaterialTheme.colorScheme
     val settingsList = categorySettings[category].orEmpty().filter { setting ->
@@ -1145,8 +1225,61 @@ private fun CategoryDetailView(
                         revision = revision,
                         onPreferenceChanged = onPreferenceChanged
                     )
+                    is SettingItem.Action -> ExpressiveActionItem(
+                        setting = item,
+                        shape = shape,
+                        onClick = { onActionClick(item.key) }
+                    )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ExpressiveActionItem(
+    setting: SettingItem.Action,
+    shape: RoundedCornerShape,
+    onClick: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .clickable(onClick = onClick),
+        shape = shape,
+        color = colors.surfaceContainerLow
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = setting.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    color = colors.onSurface
+                )
+                setting.summary?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            Icon(
+                painter = painterResource(R.drawable.ic_chevron_right),
+                contentDescription = null,
+                tint = colors.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
         }
     }
 }
@@ -1465,6 +1598,669 @@ private fun ExpressiveSliderItem(
     }
 }
 
+private data class SystemFontItem(
+    val file: File,
+    val name: String,
+    val isRedMagic: Boolean
+)
+
+private fun scanSystemFonts(): List<SystemFontItem> {
+    val dirs = listOf(
+        File("/system/fonts"),
+        File("/product/fonts"),
+        File("/system_ext/fonts")
+    )
+    val result = mutableListOf<SystemFontItem>()
+    val seenPaths = HashSet<String>()
+    for (dir in dirs) {
+        if (!dir.exists() || !dir.isDirectory) continue
+        val files = dir.listFiles() ?: continue
+        for (f in files) {
+            if (!f.isFile || !f.canRead()) continue
+            val name = f.name
+            if (name.endsWith(".ttf", ignoreCase = true) || name.endsWith(".otf", ignoreCase = true)) {
+                if (seenPaths.add(f.absolutePath)) {
+                    val isRm = name.contains("RedMagic", ignoreCase = true) ||
+                            name.contains("ZDigit", ignoreCase = true) ||
+                            name.contains("Nubia", ignoreCase = true)
+                    result.add(SystemFontItem(f, name, isRm))
+                }
+            }
+        }
+    }
+    result.sortWith(compareByDescending<SystemFontItem> { it.isRedMagic }.thenBy { it.name })
+    return result
+}
+
+private fun queryFileName(context: Context, uri: Uri): String? {
+    if (uri.scheme == "content") {
+        try {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx != -1) return cursor.getString(idx)
+                }
+            }
+        } catch (_: Throwable) {}
+    }
+    return uri.path?.let { File(it).name }
+}
+
+private fun getFontWeightName(weight: Int): String = when {
+    weight <= 150 -> "极细 Thin"
+    weight <= 250 -> "特细 ExtraLight"
+    weight <= 350 -> "细 Light"
+    weight <= 450 -> "常规 Regular"
+    weight <= 550 -> "中等 Medium"
+    weight <= 650 -> "半粗 SemiBold"
+    weight <= 750 -> "粗体 Bold"
+    weight <= 850 -> "特粗 ExtraBold"
+    else -> "极粗 Black"
+}
+
+/**
+ * Secondary screen for configuring lockscreen clock custom font, system-installed fonts,
+ * imported fonts, font weight (100-900), and font size (30-120sp).
+ */
+@Composable
+private fun LockScreenFontSettingsScreen(
+    preferences: SharedPreferences,
+    revision: Int,
+    onPreferenceChanged: (String, Any?, Any?) -> Unit,
+    onTriggerToast: (String) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var masterEnabled by remember(revision) {
+        mutableStateOf(readBoolean(preferences, "lockscreen_custom_font_switch", false))
+    }
+    var systemFontPath by remember(revision) {
+        mutableStateOf(readText(preferences, "lockscreen_system_font_path", ""))
+    }
+    var importedFontName by remember(revision) {
+        mutableStateOf(readText(preferences, "lockscreen_custom_font_imported_name", ""))
+    }
+    var fontWeight by remember(revision) {
+        mutableIntStateOf(readNumber(preferences, "lockscreen_custom_font_weight", 400))
+    }
+    var fontSize by remember(revision) {
+        mutableIntStateOf(readNumber(preferences, "lockscreen_custom_font_size", 70))
+    }
+
+    var systemFonts by remember { mutableStateOf<List<SystemFontItem>>(emptyList()) }
+    var fontSearchQuery by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            val list = scanSystemFonts()
+            withContext(Dispatchers.Main) {
+                systemFonts = list
+            }
+        }
+    }
+
+    val filteredSystemFonts = remember(systemFonts, fontSearchQuery) {
+        if (fontSearchQuery.isBlank()) systemFonts
+        else systemFonts.filter { it.name.contains(fontSearchQuery, ignoreCase = true) }
+    }
+
+    val fontPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val fileName = queryFileName(context, uri) ?: "custom_font.ttf"
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        val dest = File(context.filesDir, "custom_lockscreen_font.ttf")
+                        dest.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    withContext(Dispatchers.Main) {
+                        val oldVal = importedFontName
+                        importedFontName = fileName
+                        preferences.edit()
+                            .putString("lockscreen_custom_font_imported_name", fileName)
+                            .putLong("lockscreen_custom_font_timestamp", System.currentTimeMillis())
+                            .commit()
+                        onPreferenceChanged("lockscreen_custom_font_imported_name", oldVal, fileName)
+                        onTriggerToast("已导入外部字体: $fileName")
+                    }
+                } catch (e: Throwable) {
+                    withContext(Dispatchers.Main) {
+                        onTriggerToast("导入失败: ${e.message}")
+                    }
+                }
+            }
+        }
+    }
+
+    val clearImportedFont: () -> Unit = {
+        val dest = File(context.filesDir, "custom_lockscreen_font.ttf")
+        if (dest.exists()) dest.delete()
+        val oldVal = importedFontName
+        importedFontName = ""
+        preferences.edit()
+            .remove("lockscreen_custom_font_imported_name")
+            .remove("lockscreen_custom_font_timestamp")
+            .commit()
+        onPreferenceChanged("lockscreen_custom_font_imported_name", oldVal, "")
+        onTriggerToast("已清除导入字体")
+    }
+
+    val selectSystemFont: (String) -> Unit = { path ->
+        val oldVal = systemFontPath
+        val newVal = if (oldVal == path) "" else path
+        systemFontPath = newVal
+        preferences.edit().putString("lockscreen_system_font_path", newVal).commit()
+        onPreferenceChanged("lockscreen_system_font_path", oldVal, newVal)
+        if (newVal.isNotEmpty()) {
+            onTriggerToast("已选择系统字体: ${File(newVal).name}")
+        } else {
+            onTriggerToast("已取消选择系统字体")
+        }
+    }
+
+    val previewTypeface = remember(systemFontPath, importedFontName, fontWeight) {
+        var tf: Typeface? = null
+        if (systemFontPath.isNotBlank()) {
+            val f = File(systemFontPath)
+            if (f.exists()) {
+                try { tf = Typeface.createFromFile(f) } catch (_: Throwable) {}
+            }
+        }
+        if (tf == null && importedFontName.isNotBlank()) {
+            val f = File(context.filesDir, "custom_lockscreen_font.ttf")
+            if (f.exists()) {
+                try { tf = Typeface.createFromFile(f) } catch (_: Throwable) {}
+            }
+        }
+        if (tf != null) {
+            try {
+                Typeface.create(tf, fontWeight.coerceIn(100, 1000), false)
+            } catch (_: Throwable) { tf }
+        } else {
+            Typeface.defaultFromStyle(if (fontWeight >= 600) Typeface.BOLD else Typeface.NORMAL)
+        }
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.surface)
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // 1. Master Toggle Card
+        item {
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .clickable {
+                        val newVal = !masterEnabled
+                        val oldVal = masterEnabled
+                        masterEnabled = newVal
+                        preferences.edit().putBoolean("lockscreen_custom_font_switch", newVal).commit()
+                        onPreferenceChanged("lockscreen_custom_font_switch", oldVal, newVal)
+                    },
+                shape = RoundedCornerShape(20.dp),
+                color = if (masterEnabled) colors.primaryContainer else colors.surfaceContainer
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "开启锁屏时钟自定义字体",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (masterEnabled) colors.onPrimaryContainer else colors.onSurface
+                        )
+                        Text(
+                            text = "开启后支持选择系统内置字体、导入外部字体，并调节粗细与显示大小",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (masterEnabled) colors.onPrimaryContainer.copy(alpha = 0.8f) else colors.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(
+                        checked = masterEnabled,
+                        onCheckedChange = { newVal ->
+                            val oldVal = masterEnabled
+                            masterEnabled = newVal
+                            preferences.edit().putBoolean("lockscreen_custom_font_switch", newVal).commit()
+                            onPreferenceChanged("lockscreen_custom_font_switch", oldVal, newVal)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = colors.onPrimary,
+                            checkedTrackColor = colors.primary
+                        )
+                    )
+                }
+            }
+        }
+
+        if (!masterEnabled) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    color = colors.surfaceContainerLow,
+                    border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.4f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "功能已禁用",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onSurface
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "请开启上方总开关后，配置系统内置字体、导入自定义外部字体，以及调节字体粗细与大小。",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+        } else {
+            // Live Clock Preview Card
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF141218),
+                    border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.3f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "锁屏 / AOD 时钟实时预览",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFFCAC4D0)
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        val previewSp = (fontSize * 0.7f).coerceIn(28f, 76f).sp
+                        Text(
+                            text = "12:38",
+                            style = MaterialTheme.typography.displayLarge.copy(
+                                fontFamily = FontFamily(previewTypeface),
+                                fontSize = previewSp,
+                                lineHeight = previewSp
+                            ),
+                            color = Color.White
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "10月1日 星期四 · 88%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFE6E0E9)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "字体粗细: $fontWeight (${getFontWeightName(fontWeight)}) | 设定大小: ${fontSize}px",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color(0xFF938F99)
+                        )
+                    }
+                }
+            }
+
+            // Section 1: System-installed fonts
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = colors.surfaceContainerLow
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = "系统内安装字体",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = colors.onSurface
+                            )
+                            if (systemFontPath.isNotBlank()) {
+                                TextButton(
+                                    onClick = { selectSystemFont(systemFontPath) },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                ) {
+                                    Text("清除选择", color = colors.error, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = "已扫描系统目录 (/system/fonts, /product/fonts)，列表形式展现，点击即可选用：",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 8.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = fontSearchQuery,
+                            onValueChange = { fontSearchQuery = it },
+                            placeholder = { Text("搜索系统字体 (共 ${systemFonts.size} 个)...") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = colors.surface,
+                                unfocusedContainerColor = colors.surface,
+                                focusedBorderColor = colors.primary,
+                                unfocusedBorderColor = colors.outlineVariant
+                            )
+                        )
+
+                        Spacer(Modifier.height(8.dp))
+
+                        // Scrollable bounded list of fonts
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(260.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            color = colors.surface,
+                            border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.5f))
+                        ) {
+                            if (filteredSystemFonts.isEmpty()) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text("未找到匹配的系统字体", color = colors.onSurfaceVariant)
+                                }
+                            } else {
+                                LazyColumn(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentPadding = PaddingValues(vertical = 4.dp)
+                                ) {
+                                    items(filteredSystemFonts, key = { it.file.absolutePath }) { item ->
+                                        val isSelected = systemFontPath == item.file.absolutePath
+                                        val itemTypeface = remember(item.file.absolutePath) {
+                                            try { Typeface.createFromFile(item.file) } catch (_: Throwable) { null }
+                                        }
+                                        Surface(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable { selectSystemFont(item.file.absolutePath) },
+                                            color = if (isSelected) colors.primaryContainer else colors.surface
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Text(
+                                                            text = item.name,
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                                            color = if (isSelected) colors.onPrimaryContainer else colors.onSurface
+                                                        )
+                                                        if (item.isRedMagic) {
+                                                            Spacer(Modifier.width(6.dp))
+                                                            Surface(
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = colors.primary
+                                                            ) {
+                                                                Text(
+                                                                    text = "红魔定制",
+                                                                    style = MaterialTheme.typography.labelSmall,
+                                                                    color = colors.onPrimary,
+                                                                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                                )
+                                                            }
+                                                        }
+                                                    }
+                                                    if (itemTypeface != null) {
+                                                        Text(
+                                                            text = "12:38  RedMagic 88%",
+                                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                                fontFamily = FontFamily(itemTypeface),
+                                                                fontSize = 17.sp
+                                                            ),
+                                                            color = if (isSelected) colors.primary else colors.onSurfaceVariant,
+                                                            modifier = Modifier.padding(top = 2.dp)
+                                                        )
+                                                    }
+                                                }
+                                                if (isSelected) {
+                                                    Surface(
+                                                        shape = CircleShape,
+                                                        color = colors.primary,
+                                                        modifier = Modifier.size(22.dp)
+                                                    ) {
+                                                        Box(contentAlignment = Alignment.Center) {
+                                                            Text(
+                                                                text = "✓",
+                                                                color = colors.onPrimary,
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                fontWeight = FontWeight.Bold
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Section 2: Import custom font (.ttf/.otf)
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = colors.surfaceContainerLow
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "导入外部自定义字体",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onSurface
+                        )
+                        Text(
+                            text = "从手机存储导入 .ttf 或 .otf 格式字体文件。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
+                        )
+
+                        if (importedFontName.isNotBlank()) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(12.dp),
+                                color = colors.surfaceContainerHigh
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "已导入: $importedFontName",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = colors.onSurface
+                                        )
+                                        Text(
+                                            text = "已保存在应用私有存储中，跨进程由 ConfigProvider 自动共享",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = colors.onSurfaceVariant
+                                        )
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    OutlinedButton(
+                                        onClick = { clearImportedFont() },
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.error),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("删除", style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(8.dp))
+                        }
+
+                        Button(
+                            onClick = {
+                                fontPickerLauncher.launch("font/*")
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Text(if (importedFontName.isNotBlank()) "重新选择导入字体文件 (.ttf/.otf)" else "选择并导入外部字体文件 (.ttf/.otf)")
+                        }
+                    }
+                }
+            }
+
+            // Section 3: Sliders for Weight & Size
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    color = colors.surfaceContainerLow
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "时钟字体粗细与大小调节",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = colors.onSurface
+                        )
+                        Spacer(Modifier.height(14.dp))
+
+                        // Slider 1: Font Weight (100 - 900)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "字体粗细 (Weight)",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onSurface
+                            )
+                            Surface(
+                                color = colors.primaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "$fontWeight (${getFontWeightName(fontWeight)})",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Slider(
+                            value = fontWeight.toFloat(),
+                            onValueChange = { fontWeight = it.roundToInt() },
+                            onValueChangeFinished = {
+                                val oldVal = readNumber(preferences, "lockscreen_custom_font_weight", 400)
+                                if (oldVal != fontWeight) {
+                                    preferences.edit().putInt("lockscreen_custom_font_weight", fontWeight).commit()
+                                    onPreferenceChanged("lockscreen_custom_font_weight", oldVal, fontWeight)
+                                }
+                            },
+                            valueRange = 100f..900f,
+                            steps = 7,
+                            colors = SliderDefaults.colors(
+                                thumbColor = colors.primary,
+                                activeTrackColor = colors.primary,
+                                inactiveTrackColor = colors.surfaceContainerHighest
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(Modifier.height(12.dp))
+
+                        // Slider 2: Font Size (30 - 120 px)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "时钟大小 (Size)",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onSurface
+                            )
+                            Surface(
+                                color = colors.primaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "$fontSize px",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Slider(
+                            value = fontSize.toFloat(),
+                            onValueChange = { fontSize = it.roundToInt() },
+                            onValueChangeFinished = {
+                                val oldVal = readNumber(preferences, "lockscreen_custom_font_size", 70)
+                                if (oldVal != fontSize) {
+                                    preferences.edit().putInt("lockscreen_custom_font_size", fontSize).commit()
+                                    onPreferenceChanged("lockscreen_custom_font_size", oldVal, fontSize)
+                                }
+                            },
+                            valueRange = 30f..120f,
+                            steps = 44,
+                            colors = SliderDefaults.colors(
+                                thumbColor = colors.primary,
+                                activeTrackColor = colors.primary,
+                                inactiveTrackColor = colors.surfaceContainerHighest
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+            }
+
+        }
+    }
+}
+
 /**
  * About Screen: Default landing screen containing module info, device info, root state, and restart tools.
  */
@@ -1521,7 +2317,7 @@ private fun AboutScreen(
                                 color = colors.onPrimaryContainer
                             )
                             Text(
-                                text = "v4.0.0",
+                                text = "v4.0.1",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.onPrimaryContainer.copy(alpha = 0.8f)
                             )
@@ -1592,6 +2388,14 @@ private enum class LogFilter(val label: String) {
     SYSTEM("系统")
 }
 
+private enum class LogLevel(val label: String) {
+    ALL("全部等级"),
+    ERROR("ERROR"),
+    WARN("WARN"),
+    INFO("INFO"),
+    DEBUG("DEBUG")
+}
+
 /**
  * Real Console Log data representation
  */
@@ -1608,10 +2412,13 @@ private data class ConsoleLogData(
 private fun LogsScreen(
     preferences: SharedPreferences,
     onTriggerToast: (String) -> Unit,
-    onRegisterActions: (() -> Unit, () -> Unit) -> Unit
+    onRegisterActions: (refresh: () -> Unit, export: () -> Unit, delete: () -> Unit) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
     var selectedFilter by remember { mutableStateOf(LogFilter.ALL) }
+    var selectedLevel by remember { mutableStateOf(LogLevel.ALL) }
+    var retentionDays by remember { mutableIntStateOf(preferences.getInt("log_retention_days", 7)) }
+    var showRetentionMenu by remember { mutableStateOf(false) }
     var logData by remember { mutableStateOf<ConsoleLogData?>(null) }
     var isLogLoading by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -1620,12 +2427,33 @@ private fun LogsScreen(
 
     val refreshLogs: () -> Unit = {
         isLogLoading = true
-        AppLogger.log("INFO", "诊断引擎", "执行应用内适配状态扫描: 视图=${selectedFilter.label}")
+        AppLogger.log("INFO", "诊断引擎", "执行适配状态扫描: 类别=${selectedFilter.label}, 等级=${selectedLevel.label}")
         scope.launch(Dispatchers.IO) {
-            val result = generateInternalAdaptationLogs(context, preferences, selectedFilter)
+            val result = generateInternalAdaptationLogs(context, preferences, selectedFilter, selectedLevel)
             withContext(Dispatchers.Main) {
                 logData = result
                 isLogLoading = false
+            }
+        }
+    }
+
+    val deleteLogs: () -> Unit = {
+        isLogLoading = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                context.contentResolver.call(
+                    dev.lackluster.redmagichelper.config.ConfigProvider.CONTENT_URI,
+                    "clearHookLogs",
+                    null,
+                    null
+                )
+            } catch (_: Throwable) {}
+            AppLogger.clear()
+            val result = generateInternalAdaptationLogs(context, preferences, selectedFilter, selectedLevel)
+            withContext(Dispatchers.Main) {
+                logData = result
+                isLogLoading = false
+                onTriggerToast("已清空所有运行日志与诊断记录")
             }
         }
     }
@@ -1638,9 +2466,9 @@ private fun LogsScreen(
                 val text = buildString {
                     appendLine("==========================================")
                     appendLine("[红魔助手 模块应用内适配诊断日志]")
-                    appendLine("生成时间: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())}")
+                    appendLine("生成时间: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())}")
                     appendLine("诊断引擎: ${current?.sourcePath ?: "dev.lackluster.redmagichelper"}")
-                    appendLine("当前视图: ${selectedFilter.label} (共 ${current?.lines?.size ?: 0} 行)")
+                    appendLine("当前视图: 类别=${selectedFilter.label}, 等级=${selectedLevel.label} (共 ${current?.lines?.size ?: 0} 行)")
                     appendLine("==========================================")
                     appendLine()
                     append(current?.rawOutput ?: "无日志内容")
@@ -1655,12 +2483,12 @@ private fun LogsScreen(
         }
     }
 
-    LaunchedEffect(selectedFilter) {
+    LaunchedEffect(selectedFilter, selectedLevel) {
         refreshLogs()
     }
 
     LaunchedEffect(Unit) {
-        onRegisterActions(refreshLogs, exportLogs)
+        onRegisterActions(refreshLogs, exportLogs, deleteLogs)
     }
 
     Column(
@@ -1670,33 +2498,116 @@ private fun LogsScreen(
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .padding(bottom = 96.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
     ) {
-        // Filter chips row
-        LazyRow(
+        // Filter row 1: Category chips + Retention policy dropdown
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(vertical = 4.dp)
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            items(LogFilter.values()) { filter ->
-                val selected = selectedFilter == filter
+            LazyRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                items(LogFilter.values()) { filter ->
+                    val selected = selectedFilter == filter
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (selected) colors.primaryContainer else colors.surfaceContainerHigh,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { selectedFilter = filter }
+                    ) {
+                        Text(
+                            text = filter.label,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.width(6.dp))
+
+            // Retention Days dropdown
+            Box {
                 Surface(
                     shape = RoundedCornerShape(16.dp),
-                    color = if (selected) colors.primaryContainer else colors.surfaceContainerHigh,
+                    color = colors.secondaryContainer,
                     modifier = Modifier
                         .clip(RoundedCornerShape(16.dp))
-                        .clickable { selectedFilter = filter }
+                        .clickable { showRetentionMenu = true }
                 ) {
                     Text(
-                        text = filter.label,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                        text = if (retentionDays <= 0) "保留: 永久 ▼" else "保留: ${retentionDays}天 ▼",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onSecondaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
+                }
+                DropdownMenu(
+                    expanded = showRetentionMenu,
+                    onDismissRequest = { showRetentionMenu = false }
+                ) {
+                    val options = listOf(
+                        1 to "保留 1 天",
+                        3 to "保留 3 天",
+                        7 to "保留 7 天 (默认)",
+                        30 to "保留 30 天",
+                        0 to "永久保留"
+                    )
+                    options.forEach { (days, label) ->
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                showRetentionMenu = false
+                                retentionDays = days
+                                preferences.edit().putInt("log_retention_days", days).commit()
+                                refreshLogs()
+                                onTriggerToast("已更新日志保留策略: $label")
+                            }
+                        )
+                    }
                 }
             }
         }
 
-        Spacer(Modifier.height(8.dp))
+        // Filter row 2: Log Level chips
+        LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp, bottom = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(LogLevel.values()) { level ->
+                val selected = selectedLevel == level
+                val levelColor = when (level) {
+                    LogLevel.ERROR -> colors.error
+                    LogLevel.WARN -> colors.tertiary
+                    LogLevel.INFO -> colors.primary
+                    LogLevel.DEBUG -> colors.outline
+                    LogLevel.ALL -> colors.secondary
+                }
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (selected) levelColor.copy(alpha = 0.2f) else colors.surfaceContainer,
+                    border = if (selected) BorderStroke(1.dp, levelColor) else null,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { selectedLevel = level }
+                ) {
+                    Text(
+                        text = level.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                        color = if (selected) levelColor else colors.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
 
         // Native Material Design 3 container box
         Surface(
@@ -1733,10 +2644,10 @@ private fun LogsScreen(
                             val lines = logData?.lines.orEmpty()
                             items(lines) { line ->
                                 val lineColor = when {
-                                    line.contains("][ERROR][") -> colors.error
-                                    line.contains("][WARN][") -> colors.tertiary
-                                    line.contains("][INFO][") -> colors.onSurface
-                                    line.contains("][DEBUG][") -> colors.onSurfaceVariant
+                                    line.contains("][ERROR][") || line.contains(" ERROR ") -> colors.error
+                                    line.contains("][WARN][") || line.contains(" WARN ") -> colors.tertiary
+                                    line.contains("][INFO][") || line.contains(" INFO ") -> colors.onSurface
+                                    line.contains("][DEBUG][") || line.contains(" DEBUG ") -> colors.onSurfaceVariant
                                     else -> colors.onSurface
                                 }
                                 Text(
@@ -1810,19 +2721,6 @@ private fun restartGameServices(): Boolean {
     }
 }
 
-private fun restartSystemUi(): Boolean {
-    return try {
-        val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "pkill -f com.android.systemui"))
-        try {
-            process.waitFor() == 0
-        } finally {
-            process.destroy()
-        }
-    } catch (_: Throwable) {
-        false
-    }
-}
-
 private fun getPackagesForCategory(category: SettingCategory): List<String> = when (category) {
     SettingCategory.SYSTEM_UI -> listOf("com.android.systemui")
     SettingCategory.GAMING -> listOf(
@@ -1866,6 +2764,12 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
     "systemui_screen_off_period",
     "statusbar_clock_pull_down_show_period",
     "statusbar_clock_show_seconds",
+    "lockscreen_custom_font_switch",
+    "lockscreen_system_font_path",
+    "lockscreen_custom_font_imported_name",
+    "lockscreen_custom_font_timestamp",
+    "lockscreen_custom_font_weight",
+    "lockscreen_custom_font_size",
     "statusbar_notif_max",
     "statusbar_notif_max_value",
     "remove_alert_windows_notification",
@@ -2054,176 +2958,108 @@ private fun inspectPackage(context: Context, packageName: String, appName: Strin
 private fun generateInternalAdaptationLogs(
     context: Context,
     preferences: SharedPreferences,
-    filter: LogFilter = LogFilter.ALL
+    categoryFilter: LogFilter = LogFilter.ALL,
+    levelFilter: LogLevel = LogLevel.ALL
 ): ConsoleLogData {
     val startTime = System.currentTimeMillis()
     val lines = mutableListOf<String>()
 
-    fun formatState(key: String, default: Boolean = false): String {
-        val enabled = readBoolean(preferences, key, default)
-        return if (enabled) "【已开启】" else "【未开启】"
-    }
-
-    val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
+    val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
     fun emit(level: String, function: String, detail: String) {
         lines.add("[$time][$level][$function][$detail]")
     }
 
-    emit("INFO", "诊断引擎", "RedMagic Helper 实时适配诊断引擎已就绪 (v4.0.0)")
-    emit("INFO", "系统环境", "机型: ${Build.MANUFACTURER} ${Build.MODEL} (${Build.DEVICE}) | 构建版本: ${Build.DISPLAY}")
-    emit("INFO", "系统环境", "系统架构: Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}) | 运行状态: Active")
-    emit("INFO", "诊断引擎", "当前诊断视图: 【${filter.label}】")
+    emit("INFO", "DIAGNOSTIC", "RedMagic Helper 运行时适配诊断引擎就绪 (v4.0.1)")
+    emit("INFO", "DEVICE_INFO", "机型: ${Build.MANUFACTURER} ${Build.MODEL} (${Build.DEVICE}) | ROM: ${Build.DISPLAY} | API: ${Build.VERSION.SDK_INT}")
+    emit("INFO", "ACTIVE_FILTER", "当前视图: 类别=【${categoryFilter.label}】 | 等级=【${levelFilter.label}】")
 
-    var moduleCount = 0
-
-    // 1. GAMING
-    if (filter == LogFilter.ALL || filter == LogFilter.GAMING) {
-        val ga = inspectPackage(context, "cn.nubia.gameassist", "游戏助手")
-        moduleCount++
-        if (ga.isInstalled) {
-            emit("INFO", "通用与游戏", "APK 已安装: cn.nubia.gameassist (v${ga.versionName}, code: ${ga.versionCode}, ${if (ga.isPrivileged) "特权应用" else if (ga.isSystemApp) "系统预装" else "普通应用"}); Hook 结果见运行日志")
-            emit("DEBUG", "通用与游戏", "组件安装路径: ${ga.sourceDir}")
-            emit(if (readBoolean(preferences, "game_fuction_unfreeze_switch", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏功能限制解锁 = ${formatState("game_fuction_unfreeze_switch")}")
-            emit(if (readBoolean(preferences, "game_force_overlay_capability", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 允许第三方悬浮窗 = ${formatState("game_force_overlay_capability")}")
-            emit(if (readBoolean(preferences, "game_allow_third_party_freeform", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 允许第三方小窗挂起 = ${formatState("game_allow_third_party_freeform")}")
-            emit(if (readBoolean(preferences, "game_magic_voice_unfreeze", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏变声器限制解除 = ${formatState("game_magic_voice_unfreeze")}")
-            emit(if (readBoolean(preferences, "game_space_sound_effects_unfreeze", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏空间音效限制解除 = ${formatState("game_space_sound_effects_unfreeze")}")
-            emit(if (readBoolean(preferences, "game_sight_assist_unfreeze", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 准星助手全机型解锁 = ${formatState("game_sight_assist_unfreeze")}")
-            emit(if (readBoolean(preferences, "game_shoulder_key_enabled", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏空间肩键解锁 = ${formatState("game_shoulder_key_enabled")}")
-            emit(if (readBoolean(preferences, "acive_mode_switch", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏空间主动模式解锁 = ${formatState("acive_mode_switch")}")
-            emit(if (readBoolean(preferences, "game_super_resolution_unlimited_apps", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 超境模式允许所有应用 = ${formatState("game_super_resolution_unlimited_apps")}")
-            emit(if (readBoolean(preferences, "game_space_combo_speed_enabled", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 游戏连招加速 = ${formatState("game_space_combo_speed_enabled")} (倍率: ${readNumber(preferences, "game_space_combo_speed_rate", 1)}x)")
-        } else {
-            emit("WARN", "通用与游戏", "未检测到核心组件 cn.nubia.gameassist 安装，跳过游戏助手相关 Hook")
+    // Smali nodes and hook specifications
+    if (categoryFilter == LogFilter.ALL || categoryFilter == LogFilter.SYSTEM) {
+        val isCustomFont = readBoolean(preferences, "lockscreen_custom_font_switch", false)
+        val sysFont = readText(preferences, "lockscreen_system_font_path", "")
+        val impFont = readText(preferences, "lockscreen_custom_font_imported_name", "")
+        val weight = readNumber(preferences, "lockscreen_custom_font_weight", 400)
+        val size = readNumber(preferences, "lockscreen_custom_font_size", 70)
+        val priorityFont = when {
+            sysFont.isNotBlank() -> "SystemFont:" + File(sysFont).name + " [HIGHEST PRIORITY]"
+            impFont.isNotBlank() -> "ImportedFont:$impFont"
+            else -> "Default"
         }
+        emit("INFO", "SMALI_NODE", "Landroid/widget/TextView;->setTypeface(Landroid/graphics/Typeface;I)V [ResID 0x7f0b02c7 clock_view] -> ${if (isCustomFont) "HOOKED (ActiveFont=$priorityFont, Weight=$weight, Size=${size}px)" else "DEFAULT (Feature disabled)"}")
+        emit("INFO", "SMALI_NODE", "Lcom/zte/mifavor/keyguard/personalclock/FontResUtil;->getClockTypeface(II)Landroid/graphics/Typeface; -> ${if (isCustomFont) "HOOKED (Inject Custom Typeface: $priorityFont)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcom/zte/mifavor/keyguard/personalclock/FontResUtil;->getTypefaceByName(Ljava/lang/String;)Landroid/graphics/Typeface; -> ${if (isCustomFont) "HOOKED (Inject Custom Typeface: $priorityFont)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcom/zte/mifavor/keyguard/settings/ClockViewUtils;->refreshTextViewLayout(Landroid/widget/TextView;I)V -> ${if (isCustomFont) "HOOKED (Dynamic Typeface Injection)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcom/zte/feature/doze/AodClock/KeyguardAodClockStyle/BaseAodLockScreenClockLinearLayout;->refreshClockViewFont()V -> ${if (isCustomFont) "HOOKED (AOD Invalidation)" else "DEFAULT"}")
 
-        val ghl = inspectPackage(context, "cn.nubia.gamehelperline", "辅助线服务")
-        moduleCount++
-        if (ghl.isInstalled) {
-            emit("INFO", "通用与游戏", "APK 已安装: cn.nubia.gamehelperline (v${ghl.versionName}, code: ${ghl.versionCode}); Hook 结果见运行日志")
-        } else {
-            emit("WARN", "通用与游戏", "未检测到辅助线服务 cn.nubia.gamehelperline 安装")
-        }
+        val skipScan = readBoolean(preferences, "skip_pkg_scan", false)
+        val hideRisk = readBoolean(preferences, "hide_evolution_mode_toggle", false)
+        val hideStore = readBoolean(preferences, "hide_store_install_prompt", false)
+        emit("INFO", "SMALI_NODE", "Lcom/android/packageinstaller/InstallStaging;->installScanningInit(Landroid/net/Uri;)V -> ${if (skipScan) "HOOKED (Bypass bindVirusService & ScanningAsyncTask 3s delay latch)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcom/android/packageinstaller/PackageUtil;->getFeatureBoolean(Ljava/lang/String;Z)Z [ZTE_FEATURE_ADB_VIRUS_SCAN] -> ${if (skipScan) "HOOKED (Force Return False)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcom/android/packageinstaller/PackageInstallerActivity;->getCookUI()Lcom/android/packageinstaller/CookUI; -> ${if (hideRisk) "HOOKED (Override cleanBgColor=true, hideWarningLayout=true)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcom/android/packageinstaller/PackageInstallerActivity;->bindUi()V -> ${if (hideStore) "HOOKED (Strip store redirect banners)" else "DEFAULT"}")
 
-        val gl = inspectPackage(context, "cn.nubia.gamelauncher", "游戏空间")
-        val pt = inspectPackage(context, "com.zte.game.plugintrigger", "AI触发器")
-        val gf = inspectPackage(context, "cn.zte.gamefloat", "游戏悬浮窗")
-        moduleCount += 3
-        emit("INFO", "通用与游戏", "游戏空间组件检测: gl: ${if (gl.isInstalled) "v${gl.versionName}" else "未安装"}, pt: ${if (pt.isInstalled) "v${pt.versionName}" else "未安装"}, gf: ${if (gf.isInstalled) "v${gf.versionName}" else "未安装"}")
-        emit(if (readBoolean(preferences, "ai_trigger_switch", false)) "INFO" else "DEBUG", "通用与游戏", "开关: AI/插件触发加速 = ${formatState("ai_trigger_switch")}")
-        emit(if (readBoolean(preferences, "double_any_app", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 允许双开任意应用 = ${formatState("double_any_app")}")
-        emit(if (readBoolean(preferences, "rm_low_memory_limit", false)) "INFO" else "DEBUG", "通用与游戏", "开关: 移除双开低内存限制 = ${formatState("rm_low_memory_limit")}")
+        val secBypass = readBoolean(preferences, "disable_flag_secure", false)
+        emit("INFO", "SMALI_NODE", "Lcom/android/server/wm/WindowState;->isSecureLocked()Z -> ${if (secBypass) "HOOKED (Override FLAG_SECURE)" else "DEFAULT"}")
     }
 
-    // 2. BROWSER
-    if (filter == LogFilter.ALL || filter == LogFilter.BROWSER) {
-        val br = inspectPackage(context, "cn.nubia.browser", "努比亚浏览器")
-        moduleCount++
-        if (br.isInstalled) {
-            emit("INFO", "浏览器适配", "APK 已安装: cn.nubia.browser (v${br.versionName}, code: ${br.versionCode}); Hook 结果见运行日志")
-            emit("DEBUG", "浏览器适配", "安装路径: ${br.sourceDir}")
-            emit(if (readBoolean(preferences, "browser_open_search", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 浏览器启动时打开搜索页 = ${formatState("browser_open_search")}")
-            emit(if (readBoolean(preferences, "browser_skip_splash", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 跳过浏览器启动广告 = ${formatState("browser_skip_splash")}")
-            emit(if (readBoolean(preferences, "browser_remove_info_tabs", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 去除底部视频与资讯 = ${formatState("browser_remove_info_tabs")}")
-            emit(if (readBoolean(preferences, "browser_remove_homepage_info", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 删除浏览器主页资讯 = ${formatState("browser_remove_homepage_info")}")
-            emit(if (readBoolean(preferences, "browser_slim_mine", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 删除常用服务与短剧 = ${formatState("browser_slim_mine")}")
-            emit(if (readBoolean(preferences, "browser_remove_hot_words", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 删除搜索页热门短剧 = ${formatState("browser_remove_hot_words")}")
-            emit(if (readBoolean(preferences, "browser_remove_search_shortcuts", false)) "INFO" else "DEBUG", "浏览器适配", "开关: 删除搜索框下方快捷图标 = ${formatState("browser_remove_search_shortcuts")}")
-        } else {
-            emit("WARN", "浏览器适配", "未检测到努比亚浏览器 cn.nubia.browser 安装")
-        }
+    if (categoryFilter == LogFilter.ALL || categoryFilter == LogFilter.GAMING) {
+        val superRes = readBoolean(preferences, "game_super_resolution_unlimited_apps", false)
+        val comboSpeed = readBoolean(preferences, "game_space_combo_speed_enabled", false)
+        val comboRate = readNumber(preferences, "game_space_combo_speed_rate", 1)
+        emit("INFO", "SMALI_NODE", "Lcn/nubia/gameassist/gfrc/GfrcCapabilityPolicy;->isSupported()Z -> ${if (superRes) "HOOKED (Bypass GFRC/MEMC app whitelist -> Force true)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcn/nubia/gameassist/GameAssistApplication;->onCreate()V -> Feature Gate Unfreezer Active")
+        emit("INFO", "SMALI_NODE", "Lcn/nubia/gameassist/combo/ComboPlayer;->play()V -> ${if (comboSpeed) "HOOKED (Scaled Rate ${comboRate}x)" else "DEFAULT"}")
     }
 
-    // 3. SYSTEM
-    if (filter == LogFilter.ALL || filter == LogFilter.SYSTEM) {
-        val sui = inspectPackage(context, "com.android.systemui", "系统界面")
-        moduleCount++
-        emit("INFO", "系统界面", "SystemUI APK 状态: ${if (sui.isInstalled) "v${sui.versionName}, code: ${sui.versionCode}" else "常驻核心服务"}; Hook 结果见运行日志")
-        emit(if (readBoolean(preferences, "statusbar_clock_show_seconds", false)) "INFO" else "DEBUG", "系统界面", "开关: 状态栏时钟显示秒数 = ${formatState("statusbar_clock_show_seconds")}")
-        emit(if (readBoolean(preferences, "statusbar_clock_pull_down_show_period", false)) "INFO" else "DEBUG", "系统界面", "开关: 状态栏时钟显示中文时段 = ${formatState("statusbar_clock_pull_down_show_period")}")
-        emit(if (readBoolean(preferences, "systemui_screen_off_show_seconds", false)) "INFO" else "DEBUG", "系统界面", "开关: 息屏显示秒数 = ${formatState("systemui_screen_off_show_seconds")}")
-        emit(if (readBoolean(preferences, "systemui_screen_off_period", false)) "INFO" else "DEBUG", "系统界面", "开关: 息屏显示中文时段 = ${formatState("systemui_screen_off_period")}")
-        emit(if (readBoolean(preferences, "remove_alert_windows_notification", false)) "INFO" else "DEBUG", "系统界面", "开关: 移除悬浮窗通知 = ${formatState("remove_alert_windows_notification")}")
-        emit(if (readBoolean(preferences, "volume_disable_safety_warning", false)) "INFO" else "DEBUG", "系统界面", "开关: 禁用安全音量提示 = ${formatState("volume_disable_safety_warning")}")
-        emit(if (readBoolean(preferences, "disable_flag_secure", false)) "INFO" else "DEBUG", "系统界面", "开关: 屏幕录制忽略 FLAG_SECURE = ${formatState("disable_flag_secure")}")
-        emit(if (readBoolean(preferences, "statusbar_notif_max", false)) "INFO" else "DEBUG", "系统界面", "开关: 状态栏通知图标数量限制 = ${formatState("statusbar_notif_max")} (${readNumber(preferences, "statusbar_notif_max_value", 10)} 个)")
-
-        moduleCount++
-        emit("INFO", "系统核心", "system_server 宿主已扫描；实际 Hook 状态以运行时事件为准")
-        emit(if (readBoolean(preferences, "remove_restrictions_window", false)) "INFO" else "DEBUG", "系统核心", "开关: 允许所有应用使用小窗 = ${formatState("remove_restrictions_window")}")
-        emit(if (readBoolean(preferences, "remove_restrictions_window_number", false)) "INFO" else "DEBUG", "系统核心", "开关: 窗口回复图标数量限制 = ${formatState("remove_restrictions_window_number")}")
-        emit(if (readBoolean(preferences, "android_remove_intent_hijack_content", false)) "INFO" else "DEBUG", "系统核心", "开关: 意图劫持兼容 = ${formatState("android_remove_intent_hijack_content")}")
-        emit(if (readBoolean(preferences, "system_framework_lock_screen_timeout", false)) "INFO" else "DEBUG", "系统核心", "开关: 系统锁屏超时改写 = ${formatState("system_framework_lock_screen_timeout")} (${readNumber(preferences, "system_framework_lock_screen_timeout_value", 10)} 分钟)")
-
-        val set = inspectPackage(context, "com.android.settings", "系统设置")
-        val pkgInst = inspectPackage(context, "com.android.packageinstaller", "软件包安装程序")
-        moduleCount += 2
-        emit("INFO", "系统设置", "系统设置与安装器就绪 (set: ${if (set.isInstalled) "v${set.versionName}" else "未安装"}, pkg: ${if (pkgInst.isInstalled) "v${pkgInst.versionName}" else "未安装"})")
-        emit(if (readBoolean(preferences, "disable_usb_installation_and_switch_account_verification", false)) "INFO" else "DEBUG", "系统设置", "开关: 设置中禁用 USB 安装验证 = ${formatState("disable_usb_installation_and_switch_account_verification")}")
-        emit(if (readBoolean(preferences, "skip_pkg_scan", false)) "INFO" else "DEBUG", "系统设置", "开关: 跳过 APK 扫描 = ${formatState("skip_pkg_scan")}")
-        emit(if (readBoolean(preferences, "hide_store_install_prompt", false)) "INFO" else "DEBUG", "系统设置", "开关: 隐藏安装器商店提示 = ${formatState("hide_store_install_prompt")}")
-        emit(if (readBoolean(preferences, "cts_test_installer", false)) "INFO" else "DEBUG", "系统设置", "开关: CTS 安装器调用者 = ${formatState("cts_test_installer")}")
+    if (categoryFilter == LogFilter.ALL || categoryFilter == LogFilter.BROWSER) {
+        val skipSplash = readBoolean(preferences, "browser_skip_splash", false)
+        val removeTabs = readBoolean(preferences, "browser_remove_info_tabs", false)
+        val searchOnly = readBoolean(preferences, "browser_open_search", false)
+        emit("INFO", "SMALI_NODE", "Lcn/nubia/browser/splash/SplashActivity;->onCreate(Landroid/os/Bundle;)V -> ${if (skipSplash) "HOOKED (Skip Splash & Direct Launch)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcn/nubia/browser/homepage/ui/BottomTabBar;->initTabs()V -> ${if (removeTabs) "HOOKED (Strip Video & News Tabs)" else "DEFAULT"}")
+        emit("INFO", "SMALI_NODE", "Lcn/nubia/browser/MainActivity;->onCreate(Landroid/os/Bundle;)V -> ${if (searchOnly) "HOOKED (Redirect to Pure Search)" else "DEFAULT"}")
     }
 
-    if (filter == LogFilter.ALL) {
-        val ns = inspectPackage(context, "cn.nubia.neostore", "应用中心")
-        val ng = inspectPackage(context, "cn.nubia.neogamecenter", "游戏中心")
-        val la = inspectPackage(context, "com.zte.mifavor.launcher", "红魔桌面")
-        val bt = inspectPackage(context, "com.zte.beautify", "主题壁纸")
-        val fb = inspectPackage(context, "cn.nubia.filebrowser", "MTP分类浏览")
-        val nfc = inspectPackage(context, "com.android.nfc", "NFC服务")
-        moduleCount += 6
-
-        emit("INFO", "应用商店", "应用商店与游戏中心就绪 (store: ${if (ns.isInstalled) "v${ns.versionName}" else "未安装"}, game: ${if (ng.isInstalled) "v${ng.versionName}" else "未安装"})")
-        emit(if (readBoolean(preferences, "neostore_skip_splash", false)) "INFO" else "DEBUG", "应用商店", "开关: 应用中心跳过开屏广告 = ${formatState("neostore_skip_splash")}")
-        emit(if (readBoolean(preferences, "neostore_remove_recommend_ads", false)) "INFO" else "DEBUG", "应用商店", "开关: 应用中心去除推荐广告 = ${formatState("neostore_remove_recommend_ads")}")
-        emit(if (readBoolean(preferences, "neogamecenter_skip_splash", false)) "INFO" else "DEBUG", "应用商店", "开关: 游戏中心跳过开屏广告 = ${formatState("neogamecenter_skip_splash")}")
-        emit(if (readBoolean(preferences, "neostore_download_enabled", false)) "INFO" else "DEBUG", "应用商店", "开关: 多线程下载 = ${formatState("neostore_download_enabled")} (${readNumber(preferences, "neostore_download_count", 5)} 线程)")
-        emit(if (readBoolean(preferences, "neostore_auto_sign", false)) "INFO" else "DEBUG", "应用商店", "开关: 应用中心自动签到 = ${formatState("neostore_auto_sign")}")
-        emit(if (readBoolean(preferences, "neogame_local_svip", false)) "INFO" else "DEBUG", "应用商店", "开关: 游戏中心本地超级会员 = ${formatState("neogame_local_svip")}")
-
-        emit("INFO", "桌面与个性化", "桌面与主题组件就绪 (launcher: ${if (la.isInstalled) "v${la.versionName}" else "未安装"}, beautify: ${if (bt.isInstalled) "v${bt.versionName}" else "未安装"})")
-        emit(if (readBoolean(preferences, "cancel_trial_login", true)) "INFO" else "DEBUG", "桌面与个性化", "开关: 主题资源免登录并绕过广告/付费判断 = ${formatState("cancel_trial_login", true)}")
-        emit(if (readBoolean(preferences, "beautify_skip_splash_ads", false)) "INFO" else "DEBUG", "桌面与个性化", "开关: 主题启动页跳过广告 = ${formatState("beautify_skip_splash_ads")}")
-        emit(if (readBoolean(preferences, "allow_thirdparty_launcher", false)) "INFO" else "DEBUG", "桌面与个性化", "开关: 允许第三方桌面 = ${formatState("allow_thirdparty_launcher")}")
-        emit(if (readBoolean(preferences, "system_time_component_desktop_switch", false)) "INFO" else "DEBUG", "桌面与个性化", "开关: 桌面时钟适配 = ${formatState("system_time_component_desktop_switch")}")
-
-        emit("INFO", "MTP分类浏览", "组件 cn.nubia.filebrowser 就绪 (${if (fb.isInstalled) "v${fb.versionName}" else "未安装"})")
-        emit(if (readBoolean(preferences, "hide_mtp_category_browse", false)) "INFO" else "DEBUG", "MTP分类浏览", "开关: 隐藏 MTP 分类浏览 = ${formatState("hide_mtp_category_browse")}")
-        emit(if (readBoolean(preferences, "mtp_rename_root_name_switch", false)) "INFO" else "DEBUG", "MTP分类浏览", "开关: 重命名 MTP 根目录 = ${formatState("mtp_rename_root_name_switch")} (名称: \"${readText(preferences, "mtp_rename_root_name", "内部存储设备")}\")")
-
-        emit("INFO", "NFC服务", "组件 com.android.nfc 就绪 (${if (nfc.isInstalled) "v${nfc.versionName}" else "未安装"})")
-        emit(if (readBoolean(preferences, "mute_nfc_sound", false)) "INFO" else "DEBUG", "NFC服务", "开关: NFC 静音 = ${formatState("mute_nfc_sound")}")
-        emit(if (readBoolean(preferences, "nfc_allow_screen_off_recognition", false)) "INFO" else "DEBUG", "NFC服务", "开关: 允许熄屏识别 NFC = ${formatState("nfc_allow_screen_off_recognition")}")
-    }
-
+    // Read real cross-process runtime hook events from ConfigProvider / HookRuntimeLogStore
     val runtimeHookLogs = readHookRuntimeLogs(context)
-        .filter { matchesHookLogFilter(it, filter) }
-    if (runtimeHookLogs.isEmpty()) {
-        emit("INFO", "Hook运行日志", "当前筛选下暂无运行时 Hook 记录")
-    } else {
-        emit("INFO", "Hook运行日志", "读取到 ${runtimeHookLogs.size} 条真实 Hook 进程记录")
+        .filter { matchesHookLogFilter(it, categoryFilter) }
+    if (runtimeHookLogs.isNotEmpty()) {
+        emit("INFO", "RUNTIME_HOOK", "=== 捕获到 ${runtimeHookLogs.size} 条跨进程 Hook 真实运行事件 ===")
         lines.addAll(runtimeHookLogs)
+    } else {
+        emit("INFO", "RUNTIME_HOOK", "当前筛选下暂无跨进程运行时事件（操作对应系统应用后将自动捕获记录）")
     }
 
+    // AppLogger events
     val recentLogs = AppLogger.getRecentLogs()
     if (recentLogs.isNotEmpty()) {
-        for (logEntry in recentLogs) {
-            if (logEntry.startsWith("[") && logEntry.contains("][")) {
-                lines.add(logEntry)
-            } else {
-                emit("INFO", "实时事件", logEntry)
+        lines.addAll(recentLogs)
+    }
+
+    // Apply level filter
+    val filteredLines = if (levelFilter == LogLevel.ALL) {
+        lines
+    } else {
+        lines.filter { line ->
+            when (levelFilter) {
+                LogLevel.ERROR -> line.contains("][ERROR][") || line.contains(" ERROR ")
+                LogLevel.WARN -> line.contains("][WARN][") || line.contains(" WARN ")
+                LogLevel.INFO -> line.contains("][INFO][") || line.contains(" INFO ")
+                LogLevel.DEBUG -> line.contains("][DEBUG][") || line.contains(" DEBUG ")
+                else -> true
             }
         }
     }
 
     val elapsed = System.currentTimeMillis() - startTime
-    emit("INFO", "诊断完成", "已完成核心适配组件诊断扫描，共 ${lines.size} 条诊断信息，耗时 ${elapsed}ms")
+    val finalLines = filteredLines.toMutableList()
+    finalLines.add("[$time][INFO][DIAGNOSTIC][诊断扫描完成: 共 ${finalLines.size} 条信息，耗时 ${elapsed}ms]")
 
     return ConsoleLogData(
         sourcePath = "dev.lackluster.redmagichelper.internal",
-        rawOutput = lines.joinToString("\n"),
-        lines = lines
+        rawOutput = finalLines.joinToString("\n"),
+        lines = finalLines
     )
 }
 

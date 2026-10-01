@@ -10,8 +10,8 @@ def releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
 def hasReleaseSigning = releaseStoreFile && releaseStorePassword
         && releaseKeyAlias && releaseKeyPassword
-def buildVersionCode = (System.getenv("VERSION_CODE") ?: "26091400").toInteger()
-def buildVersionName = System.getenv("VERSION_NAME") ?: "4.0.0-rewrite"
+def buildVersionCode = (System.getenv("VERSION_CODE") ?: "26091401").toInteger()
+def buildVersionName = System.getenv("VERSION_NAME") ?: "4.0.1-rewrite"
 
 android {
     namespace "dev.lackluster.redmagichelper"

@@ -480,24 +480,8 @@ public final class NeoStoreAdapter implements HostAdapter {
     }
 
     private static void installAdRemoval(HookSession session) {
-        // NeoStore's remaining home-page cards are SSP recommendation ads,
-        // not the splash/popup path. They are requested through AdManager's
-        // recommendPackage() API and can therefore still reach the network
-        // after every visual adapter has been hidden.
         Class<?> sspManager = session.findOptionalClass("com.huanju.ssp.sdk.AdManager");
         if (sspManager != null) {
-            session.hook(sspManager, "setRecDisable", chain ->
-                    HookValues.proceedWithArgument(chain, 0, 1), int.class);
-            Class<?> recommendListener = session.findOptionalClass(
-                    "com.huanju.ssp.sdk.inf.IRecommendListener");
-            if (recommendListener != null) {
-                session.hook(sspManager, "recommendPackage", chain -> null,
-                        recommendListener, List.class, String.class, int.class,
-                        String.class);
-                session.hook(sspManager, "recommendPackage", chain -> null,
-                        recommendListener, List.class, String.class,
-                        String.class);
-            }
             session.hook(sspManager, "showBanner", chain -> null,
                     Activity.class, String.class, int.class);
             session.hook(sspManager, "showInsertAdView", chain -> null,
@@ -527,24 +511,7 @@ public final class NeoStoreAdapter implements HostAdapter {
                 session.hook(sspManager, "showSplashAd", chain -> null,
                         Activity.class, Class.class, String.class, adListener, int.class);
             }
-            Class<?> requestManager = session.findOptionalClass(
-                    "com.huanju.ssp.base.core.request.ad.RequestAdManager");
-            Class<?> adParameter = session.findOptionalClass(
-                    "com.huanju.ssp.base.core.request.ad.bean.AdParameter");
-            Class<?> errorInfo = session.findOptionalClass(
-                    "com.huanju.ssp.base.core.report.error.ErrorInfo");
-            Class<?> stateListener = session.findOptionalClass(
-                    "com.huanju.ssp.base.core.frame.listeners.AdStateChangListener");
-            if (requestManager != null && adParameter != null
-                    && errorInfo != null && stateListener != null) {
-                session.hook(requestManager, "requestAd", chain -> null,
-                        adParameter, errorInfo, stateListener);
-                session.hook(requestManager, "requestBidingAd", chain -> null,
-                        adParameter, errorInfo, stateListener);
-                session.hook(requestManager, "sendReqTTAd", chain -> null);
-                session.log("NEOSTORE_SSP_REQUESTS_BLOCKED");
-            }
-            session.log("NEOSTORE_SSP_RECOMMEND_ADS_DISABLED");
+            session.log("NEOSTORE_SSP_BANNER_AND_SPLASH_DISABLED");
         }
 
         Class<?> homeActivity = session.findOptionalClass(
@@ -593,71 +560,6 @@ public final class NeoStoreAdapter implements HostAdapter {
             });
         }
 
-        session.hook(TextView.class, "setText", chain -> {
-            Object result = chain.proceed();
-            Object owner = chain.getThisObject();
-            if (owner instanceof TextView
-                    && isKnownStoreAdText(String.valueOf(((TextView) owner).getText()))) {
-                View current = (View) owner;
-                for (int level = 0; level < 5 && current.getParent() instanceof View; level++) {
-                    current = (View) current.getParent();
-                    if ("app_item_layout".equals(HookValues.resourceEntryName(current))) {
-                        current.setVisibility(View.GONE);
-                        break;
-                    }
-                }
-            }
-            return result;
-        }, CharSequence.class);
-
-        // 1. RecommendAdsView (in-feed / recommend ad containers)
-        // RecommendAdsView exists in some NeoStore revisions but was removed
-        // from the shipped NeoGameCenter build. The remaining adapter hooks
-        // below are the actual ad pipeline for that build, so this lookup is
-        // optional and must not report a false broken-hook warning.
-        Class<?> recommendAds = session.findOptionalClass(
-                "cn.nubia.neostore.view.RecommendAdsView");
-        if (recommendAds != null) {
-            final Class<?> recommendAdsType = recommendAds;
-            session.hook(recommendAds, "d", chain -> {
-                Object obj = chain.getThisObject();
-                Object result = chain.proceed();
-                if (obj instanceof View) {
-                    ((View) obj).setVisibility(View.GONE);
-                }
-                return result;
-            });
-            session.hook(recommendAds, "setVisibility", chain -> {
-                // setVisibility is inherited from View on some releases.
-                // HookSession may therefore resolve android.view.View's
-                // method; never force every NeoStore View to GONE.
-                if (!recommendAdsType.isInstance(chain.getThisObject())) {
-                    return chain.proceed();
-                }
-                if (!chain.getArgs().isEmpty()) {
-                    return HookValues.proceedWithArgument(chain, 0, View.GONE);
-                }
-                return chain.proceed();
-            }, int.class);
-            // The recommendation container is populated asynchronously after
-            // its initial d() call. Re-hide it after both response paths.
-            session.hook(recommendAds, "i", chain -> {
-                Object result = chain.proceed();
-                Object owner = chain.getThisObject();
-                if (recommendAdsType.isInstance(owner) && owner instanceof View) {
-                    ((View) owner).setVisibility(View.GONE);
-                }
-                return result;
-            });
-            session.hook(recommendAds, "j", chain -> {
-                Object result = chain.proceed();
-                Object owner = chain.getThisObject();
-                if (recommendAdsType.isInstance(owner) && owner instanceof View) {
-                    ((View) owner).setVisibility(View.GONE);
-                }
-                return result;
-            });
-        }
 
         // 2. Banner & Interstitial Gromore Ad Adapters
         Class<?> bannerAdapter = session.findClass("com.alex.AlexGromoreBannerAdapter");
@@ -787,45 +689,7 @@ public final class NeoStoreAdapter implements HostAdapter {
                 if (floating != null) {
                     floating.setVisibility(View.GONE);
                 }
-                hideKnownStoreAdRows(session, root, root);
             }, delay);
         }
-    }
-
-    private static void hideKnownStoreAdRows(HookSession session, View view, View root) {
-        if (!(view instanceof ViewGroup)) {
-            return;
-        }
-        ViewGroup group = (ViewGroup) view;
-        if ("app_item_layout".equals(HookValues.resourceEntryName(view))) {
-            TextView name = findTextView(group, session, "tv_app_list_name");
-            TextView intro = findTextView(group, session, "tv_app_list_intro");
-            String text = (name == null ? "" : String.valueOf(name.getText())) + " "
-                    + (intro == null ? "" : String.valueOf(intro.getText()));
-            if (isKnownStoreAdText(text)) {
-                group.setVisibility(View.GONE);
-                return;
-            }
-        }
-        for (int i = 0; i < group.getChildCount(); i++) {
-            hideKnownStoreAdRows(session, group.getChildAt(i), root);
-        }
-    }
-
-    private static TextView findTextView(ViewGroup root, HookSession session, String name) {
-        View view = HookValues.findView(root, session.packageName(), name);
-        return view instanceof TextView ? (TextView) view : null;
-    }
-
-    private static boolean isKnownStoreAdText(String text) {
-        String value = text == null ? "" : text;
-        String[] markers = {"短剧", "小说", "免费看", "领现金", "赚钱", "腾讯视频",
-                "快手", "番茄", "红果", "王者万象棋", "福利", "红包"};
-        for (String marker : markers) {
-            if (value.contains(marker)) {
-                return true;
-            }
-        }
-        return false;
     }
 }

@@ -8,8 +8,10 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.os.Process;
 
+import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
@@ -70,9 +72,35 @@ public final class ConfigProvider extends ContentProvider {
                 return result(false);
             }
             return result(HookRuntimeLogStore.clear(context));
+        } else if ("getCustomFontBytes".equals(method)) {
+            java.io.File fontFile = new java.io.File(context.getFilesDir(), "custom_lockscreen_font.ttf");
+            if (!fontFile.exists() || fontFile.length() == 0) {
+                return failure("font_not_found");
+            }
+            try (java.io.FileInputStream fis = new java.io.FileInputStream(fontFile)) {
+                byte[] bytes = new byte[(int) fontFile.length()];
+                int read = 0;
+                while (read < bytes.length) {
+                    int count = fis.read(bytes, read, bytes.length - read);
+                    if (count < 0) break;
+                    read += count;
+                }
+                Bundle result = result(true);
+                result.putByteArray("font_bytes", bytes);
+                return result;
+            } catch (Throwable t) {
+                return failure(t.getMessage());
+            }
         }
 
-        SharedPreferences sp = context.getSharedPreferences("config", Context.MODE_PRIVATE);
+        Context deCtx = context;
+        try {
+            android.os.UserManager um = context.getSystemService(android.os.UserManager.class);
+            if (um != null && !um.isUserUnlocked()) {
+                deCtx = context.createDeviceProtectedStorageContext();
+            }
+        } catch (Throwable ignored) {}
+        SharedPreferences sp = deCtx.getSharedPreferences("config", Context.MODE_PRIVATE);
         Bundle bundle = new Bundle();
 
         if ("getAll".equals(method)) {
@@ -150,5 +178,18 @@ public final class ConfigProvider extends ContentProvider {
     @Override
     public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
         return 0;
+    }
+
+    @Override
+    public ParcelFileDescriptor openFile(Uri uri, String mode) throws FileNotFoundException {
+        Context context = getContext();
+        if (context == null) {
+            throw new FileNotFoundException("Context is null");
+        }
+        java.io.File fontFile = new java.io.File(context.getFilesDir(), "custom_lockscreen_font.ttf");
+        if (!fontFile.exists() || fontFile.length() == 0) {
+            throw new FileNotFoundException("Custom font not found at " + fontFile.getAbsolutePath());
+        }
+        return ParcelFileDescriptor.open(fontFile, ParcelFileDescriptor.MODE_READ_ONLY);
     }
 }

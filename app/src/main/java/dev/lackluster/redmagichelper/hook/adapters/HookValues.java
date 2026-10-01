@@ -130,6 +130,9 @@ final class HookValues {
         if (owner == null) {
             return null;
         }
+        if (owner instanceof Class<?>) {
+            return findField((Class<?>) owner, names);
+        }
         return findField(owner.getClass(), names);
     }
 
@@ -151,7 +154,7 @@ final class HookValues {
     static Object readField(Object owner, String... names) {
         try {
             Field field = findField(owner, names);
-            return field == null ? null : field.get(owner);
+            return field == null ? null : field.get(owner instanceof Class<?> ? null : owner);
         } catch (Throwable ignored) {
             return null;
         }
@@ -163,7 +166,7 @@ final class HookValues {
             if (field == null) {
                 return false;
             }
-            field.set(owner, value);
+            field.set(owner instanceof Class<?> ? null : owner, value);
             return true;
         } catch (Throwable ignored) {
             return false;

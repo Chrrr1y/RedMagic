@@ -17,8 +17,10 @@ import android.widget.Space;
 import android.widget.TextView;
 
 import android.content.ContextWrapper;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.WindowInsets;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
@@ -174,9 +176,7 @@ public final class BrowserAdapter implements HostAdapter {
         if (session.config().browserDisableTelemetry()) {
             installTelemetryRemoval(session);
         }
-        if (session.config().browserSkipSplash()) {
-            installSplashBypass(session);
-        }
+        installSplashBypass(session);
         boolean openSearch = session.config().browserOpenSearch();
         boolean removeInfoTabs = session.config().browserRemoveInfoTabs();
         if (openSearch) {
@@ -221,6 +221,7 @@ public final class BrowserAdapter implements HostAdapter {
         }
         installBasicModelFullServiceBypass(session);
         installAdaptiveNavigationButtons(session);
+        installSearchActivityStatusBarAdaptive(session);
         session.log("BROWSER_CAPABILITY_SCAN_COMPLETE");
     }
 
@@ -270,24 +271,26 @@ public final class BrowserAdapter implements HostAdapter {
 
     private static void installSplashBypass(HookSession session) {
         Class<?> guide = session.findClass("com.android.browser.GuideActivity");
-        HookSession.HookCallback bypassAction = chain -> {
-            Object owner = chain.getThisObject();
-            Method gotoBrowser = HookValues.findNoArgMethod(owner, "G");
-            if (gotoBrowser == null) {
-                session.missing("method=com.android.browser.GuideActivity#G()");
-                return chain.proceed();
-            }
-            try {
-                gotoBrowser.invoke(owner);
+        if (guide != null) {
+            session.hook(guide, "F", chain -> null, Activity.class);
+            HookSession.HookCallback bypassAction = chain -> {
+                Object owner = chain.getThisObject();
+                Method gotoBrowser = HookValues.findNoArgMethod(owner, "G");
+                if (gotoBrowser != null) {
+                    try {
+                        gotoBrowser.invoke(owner);
+                    } catch (Throwable ignored) {}
+                }
+                if (owner instanceof Activity) {
+                    try {
+                        ((Activity) owner).finish();
+                    } catch (Throwable ignored) {}
+                }
                 return null;
-            } catch (Throwable error) {
-                session.missing("method=com.android.browser.GuideActivity#G() invoke failed "
-                        + error.getClass().getSimpleName());
-                return chain.proceed();
-            }
-        };
-        session.hook(guide, "H", bypassAction);
-        session.hook(guide, "K", bypassAction);
+            };
+            session.hook(guide, "H", bypassAction);
+            session.hook(guide, "K", bypassAction);
+        }
 
         Class<?> dataCenter = session.findClass("com.android.browser.datacenter.DataCenter");
         session.hook(dataCenter, "isNeedShowSplash", chain -> Boolean.FALSE);
@@ -588,17 +591,7 @@ public final class BrowserAdapter implements HostAdapter {
     }
 
     private static void hidePlainLaunchUntilSearch(Activity activity) {
-        try {
-            View decor = activity.getWindow().getDecorView();
-            decor.setAlpha(0f);
-            decor.postDelayed(() -> {
-                if (decor.getAlpha() == 0f) {
-                    decor.setAlpha(1f);
-                }
-            }, 600L);
-        } catch (Throwable ignored) {
-            // The fallback does not affect the normal browser launch path.
-        }
+        // Window decor alpha must not be set to 0, which caused several seconds of black screen.
     }
 
     private static void revealPlainLaunch(View view) {
@@ -1134,6 +1127,13 @@ public final class BrowserAdapter implements HostAdapter {
                 }, Context.class, function0Clz);
             }
             session.hook(globalConfig, "g", chain -> Boolean.TRUE);
+            session.hook(globalConfig, "b", chain -> Boolean.TRUE);
+            session.hook(globalConfig, "f", chain -> {
+                if (session.config().browserRemoveDownloadHot()) {
+                    return Boolean.FALSE;
+                }
+                return Boolean.TRUE;
+            });
             session.log("BROWSER_FULL_SERVICE_GLOBAL_CONFIG_HOOKED");
         }
 
@@ -1155,6 +1155,8 @@ public final class BrowserAdapter implements HostAdapter {
                     return null;
                 }, Context.class, function0Clz);
             }
+            session.hook(serviceSettingManager, "d", chain -> Boolean.TRUE);
+            session.hook(serviceSettingManager, "c", chain -> Boolean.TRUE);
             session.log("BROWSER_FULL_SERVICE_MANAGER_HOOKED");
         }
 
@@ -1466,6 +1468,90 @@ public final class BrowserAdapter implements HostAdapter {
             }
         }
         session.log("BROWSER_ADAPTIVE_NAV_BUTTONS_INSTALLED");
+    }
+
+    private static void installSearchActivityStatusBarAdaptive(HookSession session) {
+        Class<?> searchActivity = session.findOptionalClass("com.android.browser.SearchActivity");
+        if (searchActivity == null) {
+            return;
+        }
+        session.hook(searchActivity, "onCreate", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                applySearchStatusBarInsets((Activity) owner);
+            }
+            return result;
+        }, Bundle.class);
+        session.log("BROWSER_SEARCH_STATUS_BAR_ADAPTIVE_HOOKED");
+    }
+
+    private static void applySearchStatusBarInsets(Activity activity) {
+        try {
+            int statusBarHeight = getStatusBarHeight(activity);
+            View decor = activity.getWindow().getDecorView();
+            int topLayoutId = activity.getResources().getIdentifier(
+                    "searchTopLayout", "id", activity.getPackageName());
+            View searchTop = topLayoutId != 0 ? decor.findViewById(topLayoutId) : null;
+            if (searchTop == null) {
+                searchTop = decor.findViewById(android.R.id.content);
+            }
+            if (searchTop != null) {
+                final View targetView = searchTop;
+                final int initialTop = statusBarHeight;
+                if (initialTop > 0 && targetView.getPaddingTop() < initialTop) {
+                    targetView.setPadding(
+                            targetView.getPaddingLeft(),
+                            initialTop,
+                            targetView.getPaddingRight(),
+                            targetView.getPaddingBottom()
+                    );
+                }
+                targetView.setOnApplyWindowInsetsListener((v, insets) -> {
+                    int top = 0;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        android.graphics.Insets barInsets = insets.getInsetsIgnoringVisibility(
+                                WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout());
+                        top = barInsets.top;
+                    }
+                    if (top <= 0) {
+                        top = insets.getSystemWindowInsetTop();
+                    }
+                    if (top <= 0) {
+                        top = initialTop;
+                    }
+                    if (top > 0 && v.getPaddingTop() != top) {
+                        v.setPadding(v.getPaddingLeft(), top, v.getPaddingRight(), v.getPaddingBottom());
+                    }
+                    return insets;
+                });
+                targetView.requestApplyInsets();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static int getStatusBarHeight(Context context) {
+        int height = 0;
+        try {
+            int resourceId = context.getResources().getIdentifier(
+                    "status_bar_height", "dimen", "android");
+            if (resourceId > 0) {
+                height = context.getResources().getDimensionPixelSize(resourceId);
+            }
+        } catch (Throwable ignored) {}
+        if (height <= 0 && context instanceof Activity) {
+            try {
+                Class<?> utilClz = context.getClassLoader().loadClass("com.android.browser.util.AndroidUtil");
+                Method pMethod = utilClz.getDeclaredMethod("P", Activity.class);
+                pMethod.setAccessible(true);
+                Object res = pMethod.invoke(null, (Activity) context);
+                if (res instanceof Number) {
+                    height = ((Number) res).intValue();
+                }
+            } catch (Throwable ignored) {}
+        }
+        return height;
     }
 
     private static void updateBottomNavVisibility(Object bottomBarObj) {
@@ -2805,15 +2891,17 @@ public final class BrowserAdapter implements HostAdapter {
     }
 
     private static void preloadAccountInfo(HookSession session) {
-        try {
-            Class<?> amClz = session.findOptionalClass("cn.nubia.account.AccountManager");
-            if (amClz != null) {
-                Object am = invokeStatic(amClz, "I");
-                if (am != null) {
-                    HookValues.invokeNoArg(am, "y");
+        new Thread(() -> {
+            try {
+                Class<?> amClz = session.findOptionalClass("cn.nubia.account.AccountManager");
+                if (amClz != null) {
+                    Object am = invokeStatic(amClz, "I");
+                    if (am != null) {
+                        HookValues.invokeNoArg(am, "y");
+                    }
                 }
-            }
-        } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {}
+        }, "rm-account-preload").start();
     }
 
     private static boolean isAccountLoggedIn(HookSession session) {

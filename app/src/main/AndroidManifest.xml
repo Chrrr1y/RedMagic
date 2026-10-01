@@ -35,11 +35,13 @@
         <provider
             android:name="io.github.libxposed.service.XposedProvider"
             android:authorities="dev.lackluster.redmagichelper.XposedService"
+            android:directBootAware="true"
             android:exported="true" />
 
         <provider
             android:name=".config.ConfigProvider"
             android:authorities="dev.lackluster.redmagichelper.config_provider"
+            android:directBootAware="true"
             android:exported="true" />
     </application>
 </manifest>

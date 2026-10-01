@@ -32,7 +32,7 @@ public final class HookLog {
     private static final int MAX_LOG_LINE_LENGTH = 4096;
     private static final long INFO_DUPLICATE_WINDOW_MS = 5000L;
     private static final DateTimeFormatter TIME_FORMAT = DateTimeFormatter
-            .ofPattern("HH:mm:ss", Locale.getDefault())
+            .ofPattern("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
             .withZone(ZoneId.systemDefault());
 
     private static final ArrayBlockingQueue<String> INTERNAL_QUEUE =
@@ -154,9 +154,7 @@ public final class HookLog {
         }
         enqueueInternal(line);
 
-        if (priority >= Log.ERROR) {
-            Log.println(priority, TAG, line);
-        }
+        Log.println(priority, TAG, line);
         if (priority < Log.WARN) {
             return;
         }

@@ -9,6 +9,7 @@ import android.view.ViewGroup;
 import android.widget.CompoundButton;
 import android.widget.TextView;
 
+import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 
@@ -65,33 +66,7 @@ public final class PackageInstallerAdapter implements HostAdapter {
             }
         }
 
-        if (session.config().getBoolean("skip_pkg_scan", false)) {
-            Class<?> installer = session.findOptionalClass(
-                    "com.android.packageinstaller.PackageInstallerActivity");
-            if (installer != null) {
-                for (String name : new String[]{"bindUi", "bindUiPerm", "bindUiPermRed", "onResume"}) {
-                    session.hook(installer, name, chain -> {
-                        Object result = chain.proceed();
-                        skipScanAndEnableInstall(chain.getThisObject());
-                        return result;
-                    });
-                }
-                session.hookAny(installer, new String[]{
-                        "isScanning", "isApkScanning", "hasRisk", "checkRisk"
-                }, chain -> Boolean.FALSE);
-            }
-            Class<?> staging = session.findOptionalClass(
-                    "com.android.packageinstaller.InstallStaging$StagingAsyncTask");
-            if (staging != null) {
-                session.hook(staging, "onPostExecute", chain -> chain.proceed());
-            }
-            Class<?> scanUtils = session.findOptionalClass(
-                    "com.android.packageinstaller.utils.ScanUtils",
-                    "com.android.packageinstaller.ScanUtils");
-            if (scanUtils != null) {
-                session.hookAny(scanUtils, new String[]{"isScanning", "hasRisk", "needScan"}, chain -> Boolean.FALSE);
-            }
-        }
+        installSkipScanHook(session);
 
         if (session.config().getBoolean("cts_test_installer", false)) {
             Class<?> installStart = session.findOptionalClass("com.android.packageinstaller.InstallStart");
@@ -118,6 +93,163 @@ public final class PackageInstallerAdapter implements HostAdapter {
             if (value instanceof View) {
                 HookValues.runOnMain((View) value,
                         () -> ((View) value).setVisibility(View.GONE));
+            }
+        }
+    }
+
+    private static void installSkipScanHook(HookSession session) {
+        // 1. Hook InstallStaging to bypass bindVirusService and ScanningAsyncTask
+        Class<?> stagingClass = session.findOptionalClass("com.android.packageinstaller.InstallStaging");
+        if (stagingClass != null) {
+            Class<?> uriClass = android.net.Uri.class;
+            session.hook(stagingClass, "installScanningInit", chain -> {
+                if (!session.config().getBoolean("skip_pkg_scan", false)) {
+                    return chain.proceed();
+                }
+                Object staging = chain.getThisObject();
+                android.net.Uri uri = (android.net.Uri) chain.getArgs().get(0);
+                session.logSmali("Lcom/android/packageinstaller/InstallStaging;->installScanningInit(Landroid/net/Uri;)V",
+                        "INTERCEPT: Bypassing virus scan service & latch delay");
+                try {
+                    if (uri != null) {
+                        HookValues.writeField(staging, uri.getPath(), "scan_cache_path");
+                    }
+                    Method parseMethod = staging.getClass().getDeclaredMethod("parsePackageUri", uriClass);
+                    parseMethod.setAccessible(true);
+                    boolean parsed = (Boolean) parseMethod.invoke(staging, uri);
+                    if (!parsed) {
+                        Method delete = staging.getClass().getDeclaredMethod("gotoDeleteStagedFile");
+                        delete.setAccessible(true);
+                        delete.invoke(staging);
+                        return null;
+                    }
+
+                    Class<?> wrapperClass = session.findClass("com.android.packageinstaller.InstallStaging$Wrapper");
+                    Constructor<?> ctor = wrapperClass.getDeclaredConstructor(staging.getClass());
+                    ctor.setAccessible(true);
+                    Object wrapper = ctor.newInstance(staging);
+
+                    Method launch = staging.getClass().getDeclaredMethod("LaunchNextActivity", wrapperClass);
+                    launch.setAccessible(true);
+                    launch.invoke(staging, wrapper);
+                    session.logSmali("Lcom/android/packageinstaller/InstallStaging;->LaunchNextActivity(Lcom/android/packageinstaller/InstallStaging$Wrapper;)V",
+                            "BYPASS_SUCCESS: Launched installer activity with 0s delay");
+                    return null;
+                } catch (Throwable t) {
+                    session.logSmali("Lcom/android/packageinstaller/InstallStaging;->installScanningInit",
+                            "FALLBACK: " + t.getMessage());
+                    return chain.proceed();
+                }
+            }, uriClass);
+
+            // Safety net: force bindVirusService to return false and countdown latch
+            session.hook(stagingClass, "bindVirusService", chain -> {
+                if (!session.config().getBoolean("skip_pkg_scan", false)) {
+                    return chain.proceed();
+                }
+                session.logSmali("Lcom/android/packageinstaller/InstallStaging;->bindVirusService()Z",
+                        "OVERRIDE bindVirusService -> false");
+                return Boolean.FALSE;
+            });
+
+            // ScanningAsyncTask.onPostExecute bypass fallback
+            Class<?> taskClass = session.findOptionalClass("com.android.packageinstaller.InstallStaging$ScanningAsyncTask");
+            if (taskClass != null) {
+                Class<?> wrapperClass = session.findOptionalClass("com.android.packageinstaller.InstallStaging$Wrapper");
+                if (wrapperClass != null) {
+                    session.hook(taskClass, "onPostExecute", chain -> {
+                        if (!session.config().getBoolean("skip_pkg_scan", false)) {
+                            return chain.proceed();
+                        }
+                        Object wrapper = chain.getArgs().get(0);
+                        if (wrapper != null) {
+                            Object task = chain.getThisObject();
+                            Object staging = HookValues.readField(task, "this$0");
+                            if (staging != null) {
+                                try {
+                                    Method launch = staging.getClass().getDeclaredMethod("LaunchNextActivity", wrapperClass);
+                                    launch.setAccessible(true);
+                                    launch.invoke(staging, wrapper);
+                                    session.logSmali("Lcom/android/packageinstaller/InstallStaging$ScanningAsyncTask;->onPostExecute",
+                                            "BYPASS_DELAY: direct LaunchNextActivity");
+                                    return null;
+                                } catch (Throwable ignored) {}
+                            }
+                        }
+                        return chain.proceed();
+                    }, wrapperClass);
+                }
+            }
+        }
+
+        // 2. Hook InstallScanning
+        Class<?> scanningClass = session.findOptionalClass("com.android.packageinstaller.InstallScanning");
+        if (scanningClass != null) {
+            session.hook(scanningClass, "onResume", chain -> {
+                if (!session.config().getBoolean("skip_pkg_scan", false)) {
+                    return chain.proceed();
+                }
+                Object scanning = chain.getThisObject();
+                session.logSmali("Lcom/android/packageinstaller/InstallScanning;->onResume()V",
+                        "INTERCEPT: Bypassing InstallScanning async scan");
+                try {
+                    Class<?> wrapperClass = session.findClass("com.android.packageinstaller.InstallScanning$Wrapper");
+                    Constructor<?> ctor = wrapperClass.getDeclaredConstructor(scanning.getClass());
+                    ctor.setAccessible(true);
+                    Object wrapper = ctor.newInstance(scanning);
+
+                    Method launch = scanning.getClass().getDeclaredMethod("LaunchNextActivity", wrapperClass);
+                    launch.setAccessible(true);
+                    launch.invoke(scanning, wrapper);
+                    session.logSmali("Lcom/android/packageinstaller/InstallScanning;->LaunchNextActivity",
+                            "BYPASS_SUCCESS: Launched installer activity immediately");
+                    return null;
+                } catch (Throwable t) {
+                    return chain.proceed();
+                }
+            });
+        }
+
+        // 3. Hook PackageUtil features and switches
+        Class<?> utilClass = session.findOptionalClass("com.android.packageinstaller.PackageUtil");
+        if (utilClass != null) {
+            session.hook(utilClass, "getFeatureBoolean", chain -> {
+                if (!session.config().getBoolean("skip_pkg_scan", false)) {
+                    return chain.proceed();
+                }
+                Object name = chain.getArgs().get(0);
+                if ("ZTE_FEATURE_ADB_VIRUS_SCAN".equals(name)) {
+                    session.logSmali("Lcom/android/packageinstaller/PackageUtil;->getFeatureBoolean",
+                            "OVERRIDE ZTE_FEATURE_ADB_VIRUS_SCAN -> false");
+                    return Boolean.FALSE;
+                }
+                return chain.proceed();
+            }, String.class, boolean.class);
+
+            session.hook(utilClass, "getSettingSwitchSP", chain -> {
+                if (!session.config().getBoolean("skip_pkg_scan", false)) {
+                    return chain.proceed();
+                }
+                Object key = chain.getArgs().get(1);
+                if ("virus_scan".equals(key)) {
+                    session.logSmali("Lcom/android/packageinstaller/PackageUtil;->getSettingSwitchSP",
+                            "OVERRIDE virus_scan SP -> false");
+                    return Boolean.FALSE;
+                }
+                return chain.proceed();
+            }, Context.class, String.class, boolean.class);
+        }
+
+        // 4. Ensure install button is enabled immediately in PackageInstallerActivity
+        Class<?> installer = session.findOptionalClass(
+                "com.android.packageinstaller.PackageInstallerActivity");
+        if (installer != null) {
+            for (String name : new String[]{"bindUi", "bindUiPerm", "bindUiPermRed", "onResume"}) {
+                session.hook(installer, name, chain -> {
+                    Object result = chain.proceed();
+                    skipScanAndEnableInstall(chain.getThisObject());
+                    return result;
+                });
             }
         }
     }

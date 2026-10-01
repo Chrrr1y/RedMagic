@@ -19,6 +19,7 @@ public final class ModuleConfig {
 
     public void updateFromProvider(android.os.Bundle bundle) {
         if (bundle == null) return;
+        providerValues.clear();
         for (String key : bundle.keySet()) {
             Object v = bundle.get(key);
             if (v != null) {

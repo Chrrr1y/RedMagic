@@ -1,8 +1,8 @@
 package dev.lackluster.redmagichelper.util;
 
-/** Expands the packed OEM GFRC limits to include all exposed quality and frame-rate modes. */
+/** Expands packed decimal quality/frame-rate limits to include both exposed enhancement tiers. */
 public final class GfrcCapabilityPolicy {
-    private static final int ULTRA_MODE = 2;
+    private static final int HIGHEST_EXPOSED_MODE = 2;
 
     private GfrcCapabilityPolicy() {
     }
@@ -11,8 +11,8 @@ public final class GfrcCapabilityPolicy {
         if (capability <= 0) {
             return 22;
         }
-        int interpolationLimit = Math.max(capability / 10, ULTRA_MODE);
-        int imageQualityLimit = Math.max(capability % 10, ULTRA_MODE);
-        return interpolationLimit * 10 + imageQualityLimit;
+        int imageQualityLimit = Math.max(capability / 10, HIGHEST_EXPOSED_MODE);
+        int frameRateLimit = Math.max(capability % 10, HIGHEST_EXPOSED_MODE);
+        return imageQualityLimit * 10 + frameRateLimit;
     }
 }

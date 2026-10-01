@@ -351,6 +351,10 @@ public final class HookSession {
         HookLog.info(packageName, message);
     }
 
+    public void logSmali(String smaliNode, String action) {
+        HookLog.info(packageName, "[" + smaliNode + "] " + action);
+    }
+
     public void missing(String capability) {
         recordMissing(capability);
     }

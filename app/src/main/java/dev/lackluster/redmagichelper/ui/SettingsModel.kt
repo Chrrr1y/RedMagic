@@ -33,8 +33,8 @@ enum class SettingCategory(
         R.drawable.ic_app_center
     ),
     DESKTOP(
-        "桌面",
-        "主题资源、第三方桌面与桌面时钟适配",
+        "主题/桌面",
+        "锁屏时钟自定义字体、主题资源与桌面配置",
         R.drawable.ic_header_home
     ),
     SETTINGS(
@@ -97,6 +97,15 @@ sealed interface SettingItem {
         override val dependencyKey: String? = null
     ) : SettingItem {
         override val id: String = "slider:$key"
+    }
+
+    data class Action(
+        override val title: String,
+        val key: String,
+        override val summary: String? = null,
+        override val dependencyKey: String? = null
+    ) : SettingItem {
+        override val id: String = "action:$key"
     }
 }
 
@@ -169,6 +178,7 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
         SettingItem.Toggle("游戏中心本地超级会员", "neogame_local_svip", "在游戏中心本地状态模型中保持超级会员有效状态。")
     ),
     SettingCategory.DESKTOP to listOf(
+        SettingItem.Action("锁屏时钟自定义字体", "lockscreen_custom_font_settings", "开启后选择系统已安装字体、导入自定义字体，支持粗细与大小调节。"),
         SettingItem.Toggle("主题资源免登录并绕过广告/付费判断", "cancel_trial_login", "主题壁纸应用直接放行资源下载、试用和收费判断。"),
         SettingItem.Toggle("主题启动页跳过广告", "beautify_skip_splash_ads", "打开主题时直接进入主题首页，不显示启动广告页。"),
         SettingItem.Toggle("允许第三方桌面", "allow_thirdparty_launcher", "解除系统限制，支持将第三方 Launcher 设置为默认桌面。"),

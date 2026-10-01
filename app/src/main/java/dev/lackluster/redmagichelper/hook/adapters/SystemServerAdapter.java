@@ -1,14 +1,24 @@
 package dev.lackluster.redmagichelper.hook.adapters;
 
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import dev.lackluster.redmagichelper.hook.HostAdapter;
 import dev.lackluster.redmagichelper.hook.HookSession;
 import dev.lackluster.redmagichelper.util.GfrcCapabilityPolicy;
+import dev.lackluster.redmagichelper.util.GfrcInputFramePolicy;
 import io.github.libxposed.api.XposedInterface;
 
 /** Android/system-server hooks for API 36 with candidate-based OEM fallbacks. */
 public final class SystemServerAdapter implements HostAdapter {
+    private static final String GFRC_DATA_CONTROLLER_CLASS =
+            "cn.nubia.server.cube.datacenter.f0";
+    private static final String CUBE_SYSTEM_SERVICE_CLASS =
+            "cn.nubia.server.cube.CubeService";
+
     @Override
     public void install(HookSession session) {
         if (session.config().getBoolean("remove_alert_windows_notification", false)) {
@@ -190,6 +200,7 @@ public final class SystemServerAdapter implements HostAdapter {
             } catch (Throwable ignored) {
             }
         }
+        installSm8750GfrcInputLimitHook(session);
 
         boolean gameOverlayAllowed = session.config().getBoolean("game_force_overlay_capability", false)
                 || session.config().getBoolean("game_fuction_unfreeze_switch", false)
@@ -293,5 +304,112 @@ public final class SystemServerAdapter implements HostAdapter {
             }
         } catch (Throwable ignored) {
         }
+    }
+
+    private static String readSystemProperty(String key) {
+        try {
+            Class<?> properties = Class.forName("android.os.SystemProperties");
+            Method get = properties.getMethod("get", String.class, String.class);
+            Object value = get.invoke(null, key, "");
+            return value instanceof String ? (String) value : "";
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    private static void installSm8750GfrcInputLimitHook(HookSession session) {
+        String socModel = readSystemProperty("ro.soc.model");
+        if (!"SM8750".equals(socModel)) {
+            return;
+        }
+
+        AtomicBoolean installed = new AtomicBoolean();
+        Class<?> gfrcData = session.findOptionalClass(GFRC_DATA_CONTROLLER_CLASS);
+        if (gfrcData != null) {
+            installSm8750GfrcInputLimitHook(session, gfrcData, socModel, installed);
+            return;
+        }
+
+        session.log("SYSTEM_SERVER_GFRC_DATA_CLASS_DEFERRED_UNTIL_CUBE_START");
+        Class<?> serviceManager = session.findOptionalClass(
+                "com.android.server.SystemServiceManager");
+        if (serviceManager == null) {
+            session.log("SYSTEM_SERVER_GFRC_SERVICE_START_HOOK_UNAVAILABLE");
+            return;
+        }
+        session.hook(serviceManager, "startService", chain -> {
+            Object serviceArg = HookValues.arg(chain, 0);
+            Object result = chain.proceed();
+            if (!(serviceArg instanceof Class<?>)
+                    || !CUBE_SYSTEM_SERVICE_CLASS.equals(((Class<?>) serviceArg).getName())
+                    || installed.get()) {
+                return result;
+            }
+
+            ClassLoader cubeClassLoader = ((Class<?>) serviceArg).getClassLoader();
+            if (cubeClassLoader == null) {
+                cubeClassLoader = session.classLoader();
+            }
+            try {
+                Class<?> lateGfrcData = Class.forName(
+                        GFRC_DATA_CONTROLLER_CLASS, false, cubeClassLoader);
+                installSm8750GfrcInputLimitHook(
+                        session, lateGfrcData, socModel, installed);
+            } catch (Throwable error) {
+                session.log("SYSTEM_SERVER_GFRC_DATA_CLASS_UNAVAILABLE_AFTER_CUBE_START type="
+                        + error.getClass().getSimpleName());
+            }
+            return result;
+        }, Class.class);
+        session.log("SYSTEM_SERVER_GFRC_CUBE_START_HOOKED");
+    }
+
+    private static void installSm8750GfrcInputLimitHook(
+            HookSession session,
+            Class<?> gfrcData,
+            String socModel,
+            AtomicBoolean installed
+    ) {
+        List<Method> methods = session.findMethods(
+                gfrcData, "getData", int.class, String[].class);
+        if (methods.isEmpty()) {
+            session.log("SYSTEM_SERVER_GFRC_DATA_API_MISSING");
+            return;
+        }
+        if (!installed.compareAndSet(false, true)) {
+            return;
+        }
+        Set<String> loggedPackages = ConcurrentHashMap.newKeySet();
+
+        for (Method method : methods) {
+            session.hook(method, chain -> {
+                Object original = chain.proceed();
+                if (!(original instanceof Integer)) {
+                    return original;
+                }
+                Object owner = chain.getThisObject();
+                int gfrcEnabled = HookValues.readIntField(owner, -1, "b");
+                int interpolationRate = HookValues.readIntField(owner, -1, "c");
+                int adjusted = GfrcInputFramePolicy.adjustUltraInputLimit(
+                        socModel,
+                        HookValues.intArg(chain, 0, -1),
+                        ((Integer) original).intValue(),
+                        gfrcEnabled,
+                        interpolationRate);
+                if (adjusted == ((Integer) original).intValue()) {
+                    return original;
+                }
+                Object packageArg = HookValues.arg(chain, 1);
+                String pkg = packageArg instanceof String[] && ((String[]) packageArg).length > 0
+                        ? ((String[]) packageArg)[0] : "unknown";
+                if (loggedPackages.add(pkg)) {
+                    session.log("SYSTEM_SERVER_GFRC_ULTRA_INPUT_LIMIT pkg=" + pkg
+                            + " interp=" + interpolationRate + " from=" + original
+                            + " to=" + adjusted);
+                }
+                return Integer.valueOf(adjusted);
+            });
+        }
+        session.log("SYSTEM_SERVER_GFRC_SM8750_ULTRA_LIMIT_HOOKED");
     }
 }

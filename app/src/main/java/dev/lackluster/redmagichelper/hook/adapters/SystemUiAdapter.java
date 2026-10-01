@@ -1,11 +1,21 @@
 package dev.lackluster.redmagichelper.hook.adapters;
 
+import android.content.Context;
+import android.graphics.Typeface;
+import android.os.Bundle;
 import android.text.TextUtils;
-import android.view.Window;
+import android.util.TypedValue;
 import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewParent;
+import android.view.Window;
 import android.widget.TextClock;
 import android.widget.TextView;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.util.Calendar;
 import java.util.Locale;
 
@@ -17,6 +27,8 @@ import dev.lackluster.redmagichelper.util.ClockPolicy;
 /** SystemUI clock, volume-warning and notification-icon compatibility hooks. */
 public final class SystemUiAdapter implements HostAdapter {
     private static final ThreadLocal<Boolean> TEXT_CLOCK_GUARD =
+            ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> FONT_SIZE_GUARD =
             ThreadLocal.withInitial(() -> false);
 
     @Override
@@ -47,8 +59,449 @@ public final class SystemUiAdapter implements HostAdapter {
         if (config.getBoolean("remove_alert_windows_notification", false)) {
             installAlertWindowNotificationBypass(session);
         }
+        installLockScreenClockFont(session);
         installNotificationLimit(session);
         session.log("SYSTEMUI_CAPABILITY_SCAN_COMPLETE");
+    }
+
+    private static Typeface sCachedTypeface = null;
+    private static String sCachedFontKey = "";
+    private static volatile Context sSavedContext = null;
+
+    private static Context getAnyContext() {
+        if (sSavedContext != null) {
+            return sSavedContext;
+        }
+        try {
+            Class<?> atCls = Class.forName("android.app.ActivityThread");
+            Method m = atCls.getMethod("currentApplication");
+            Object app = m.invoke(null);
+            if (app instanceof Context) {
+                sSavedContext = ((Context) app).getApplicationContext();
+                return sSavedContext;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            Class<?> appTools = Class.forName("com.zte.tools.AppTools");
+            Method m = appTools.getMethod("getAppContext");
+            Object ctx = m.invoke(null);
+            if (ctx instanceof Context) {
+                sSavedContext = ((Context) ctx).getApplicationContext();
+                return sSavedContext;
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static void installLockScreenClockFont(HookSession session) {
+        session.logSmali("Lcom/android/systemui/lockscreen/CustomClockFont;", "INIT: Registering lockscreen clock font hooks");
+
+        // 1. Hook ZTE personalclock FontResUtil
+        Class<?> fontResUtil = session.findOptionalClass("com.zte.mifavor.keyguard.personalclock.FontResUtil");
+        if (fontResUtil != null) {
+            session.hook(fontResUtil, "getClockTypeface", chain -> {
+                ModuleConfig cfg = session.config();
+                if (!cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                    return chain.proceed();
+                }
+                Typeface tf = getLockscreenTypeface(getAnyContext(), session, cfg);
+                if (tf != null) {
+                    session.logSmali("Lcom/zte/mifavor/keyguard/personalclock/FontResUtil;->getClockTypeface(II)Landroid/graphics/Typeface;",
+                            "RETURN custom Typeface");
+                    return tf;
+                }
+                return chain.proceed();
+            }, int.class, int.class);
+
+            session.hook(fontResUtil, "getTypefaceByName", chain -> {
+                ModuleConfig cfg = session.config();
+                if (!cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                    return chain.proceed();
+                }
+                Typeface tf = getLockscreenTypeface(getAnyContext(), session, cfg);
+                if (tf != null) {
+                    session.logSmali("Lcom/zte/mifavor/keyguard/personalclock/FontResUtil;->getTypefaceByName(Ljava/lang/String;)Landroid/graphics/Typeface;",
+                            "RETURN custom Typeface for " + chain.getArgs().get(0));
+                    return tf;
+                }
+                return chain.proceed();
+            }, String.class);
+        }
+
+        // 2. Hook TextView.setTypeface
+        session.hook(TextView.class, "setTypeface", chain -> {
+            Object view = chain.getThisObject();
+            ModuleConfig cfg = session.config();
+            if (!cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                return chain.proceed();
+            }
+            if (isLockScreenClockView(view)) {
+                Context ctx = ((View) view).getContext();
+                Typeface customTf = getLockscreenTypeface(ctx, session, cfg);
+                if (customTf != null) {
+                    Object[] args = chain.getArgs().toArray();
+                    args[0] = customTf;
+                    return chain.proceed(args);
+                }
+            }
+            return chain.proceed();
+        }, Typeface.class);
+
+        session.hook(TextView.class, "setTypeface", chain -> {
+            Object view = chain.getThisObject();
+            ModuleConfig cfg = session.config();
+            if (!cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                return chain.proceed();
+            }
+            if (isLockScreenClockView(view)) {
+                Context ctx = ((View) view).getContext();
+                Typeface customTf = getLockscreenTypeface(ctx, session, cfg);
+                if (customTf != null) {
+                    Object[] args = chain.getArgs().toArray();
+                    args[0] = customTf;
+                    return chain.proceed(args);
+                }
+            }
+            return chain.proceed();
+        }, Typeface.class, int.class);
+
+        // OEM clock layouts frequently restore their original text size after
+        // applying a style. Re-apply the configured pixel size after that call.
+        session.hook(TextView.class, "setTextSize", chain -> {
+            Object view = chain.getThisObject();
+            ModuleConfig cfg = session.config();
+            if (Boolean.TRUE.equals(FONT_SIZE_GUARD.get())
+                    || !cfg.getBoolean("lockscreen_custom_font_switch", false)
+                    || !isLockScreenClockView(view)
+                    || !(view instanceof TextView)) {
+                return chain.proceed();
+            }
+            Object result = chain.proceed();
+            applyConfiguredTextSize((TextView) view, cfg);
+            return result;
+        }, int.class, float.class);
+
+        session.hook(TextView.class, "setTextAppearance", chain -> {
+            Object result = chain.proceed();
+            Object view = chain.getThisObject();
+            ModuleConfig cfg = session.config();
+            if (cfg.getBoolean("lockscreen_custom_font_switch", false)
+                    && isLockScreenClockView(view) && view instanceof TextView) {
+                applyConfiguredTextSize((TextView) view, cfg);
+            }
+            return result;
+        }, Context.class, int.class);
+
+        session.hook(TextView.class, "setTextAppearance", chain -> {
+            Object result = chain.proceed();
+            Object view = chain.getThisObject();
+            ModuleConfig cfg = session.config();
+            if (cfg.getBoolean("lockscreen_custom_font_switch", false)
+                    && isLockScreenClockView(view) && view instanceof TextView) {
+                applyConfiguredTextSize((TextView) view, cfg);
+            }
+            return result;
+        }, int.class);
+
+        // 3. Hook TextView.onAttachedToWindow
+        session.hook(TextView.class, "onAttachedToWindow", chain -> {
+            Object result = chain.proceed();
+            Object viewObj = chain.getThisObject();
+            ModuleConfig cfg = session.config();
+            if (cfg.getBoolean("lockscreen_custom_font_switch", false) && isLockScreenClockView(viewObj) && viewObj instanceof TextView) {
+                applyFontToTextView((TextView) viewObj, session, cfg);
+            }
+            return result;
+        });
+
+        // 4. Hook Mifavor TextClock
+        Class<?> textClockCls = session.findOptionalClass("com.zte.mifavor.views.TextClock");
+        if (textClockCls != null) {
+            session.hookAny(textClockCls, new String[]{"onAttachedToWindow", "onTimeChanged", "refreshTime"}, chain -> {
+                Object result = chain.proceed();
+                ModuleConfig cfg = session.config();
+                if (cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                    Object thiz = chain.getThisObject();
+                    if (thiz instanceof TextView && isLockScreenClockView(thiz)) {
+                        applyFontToTextView((TextView) thiz, session, cfg);
+                    }
+                }
+                return result;
+            });
+        }
+
+        // 5. Hook Clock styles & containers
+        String[] clockStyleClasses = new String[]{
+                "com.zte.mifavor.keyguard.settings.BaseLockScreenClock",
+                "com.zte.mifavor.keyguard.settings.LockScreenClockDefault",
+                "com.zte.mifavor.keyguard.settings.LockScreenClockHorizen",
+                "com.zte.mifavor.keyguard.settings.LockScreenClockVertical",
+                "com.zte.mifavor.keyguard.settings.LockScreenClockClip",
+                "com.zte.mifavor.keyguard.settings.LockScreenClockArtword",
+                "com.zte.mifavor.keyguard.settings.LockScreenClockIncarnation",
+                "com.zte.mifavor.keyguard.settings.LockScreenClockStyleItem",
+                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.BaseAodLockScreenClockLinearLayout",
+                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockDefault",
+                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockClip",
+                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockHorizen",
+                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockVertical",
+                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockDual"
+        };
+        for (String clsName : clockStyleClasses) {
+            Class<?> cls = session.findOptionalClass(clsName);
+            if (cls != null) {
+                session.hookAny(cls, new String[]{
+                        "refreshClockViewFont", "refreshClockViewLayout", "onFinishInflate",
+                        "onAttachedToWindow", "refreshTime", "updateClockFont"
+                }, chain -> {
+                    Object result = chain.proceed();
+                    ModuleConfig cfg = session.config();
+                    if (cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                        Object target = chain.getThisObject();
+                        if (target instanceof View) {
+                            applyFontToClockHierarchy((View) target, session, cfg);
+                        }
+                    }
+                    return result;
+                });
+            }
+        }
+
+        // 6. Hook ClockViewUtils.refreshTextViewLayout
+        Class<?> clockUtils = session.findOptionalClass("com.zte.mifavor.keyguard.settings.ClockViewUtils");
+        if (clockUtils != null) {
+            session.hook(clockUtils, "refreshTextViewLayout", chain -> {
+                Object result = chain.proceed();
+                ModuleConfig cfg = session.config();
+                if (cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                    Object arg1 = chain.getArgs().get(1);
+                    if (arg1 instanceof TextView && isLockScreenClockView(arg1)) {
+                        applyFontToTextView((TextView) arg1, session, cfg);
+                    }
+                }
+                return result;
+            }, Context.class, TextView.class, int.class);
+
+            session.hook(clockUtils, "refreshTextViewLayout", chain -> {
+                Object result = chain.proceed();
+                ModuleConfig cfg = session.config();
+                if (cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                    Object arg0 = chain.getArgs().get(0);
+                    if (arg0 instanceof TextView && isLockScreenClockView(arg0)) {
+                        applyFontToTextView((TextView) arg0, session, cfg);
+                    }
+                }
+                return result;
+            }, TextView.class, int.class);
+        }
+
+        // 7. KeyguardStatusView
+        Class<?> statusView = session.findOptionalClass("com.zte.mifavor.keyguard.KeyguardStatusView");
+        if (statusView != null) {
+            session.hook(statusView, "onFinishInflate", chain -> {
+                Object result = chain.proceed();
+                ModuleConfig cfg = session.config();
+                if (cfg.getBoolean("lockscreen_custom_font_switch", false)) {
+                    Object target = chain.getThisObject();
+                    if (target instanceof View) {
+                        applyFontToClockHierarchy((View) target, session, cfg);
+                    }
+                }
+                return result;
+            });
+        }
+    }
+
+    private static void applyFontToTextView(TextView tv, HookSession session, ModuleConfig cfg) {
+        if (tv == null) return;
+        Context ctx = tv.getContext();
+        if (sSavedContext == null && ctx != null) {
+            sSavedContext = ctx.getApplicationContext();
+        }
+        Typeface customTf = getLockscreenTypeface(ctx, session, cfg);
+        HookValues.runOnMain(tv, () -> {
+            if (customTf != null) {
+                tv.setTypeface(customTf);
+            }
+            applyConfiguredTextSize(tv, cfg);
+        });
+    }
+
+    private static void applyConfiguredTextSize(TextView tv, ModuleConfig cfg) {
+        int fontSizePx = cfg.getIntFlexible("lockscreen_custom_font_size", 70);
+        if (tv == null || fontSizePx <= 0 || Boolean.TRUE.equals(FONT_SIZE_GUARD.get())) {
+            return;
+        }
+        FONT_SIZE_GUARD.set(true);
+        try {
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizePx);
+        } finally {
+            FONT_SIZE_GUARD.set(false);
+        }
+    }
+
+    private static void applyFontToClockHierarchy(View root, HookSession session, ModuleConfig cfg) {
+        if (root == null) return;
+        if (root instanceof TextView && isLockScreenClockView(root)) {
+            applyFontToTextView((TextView) root, session, cfg);
+        }
+        View clockView = root.findViewById(0x7f0b02c7);
+        if (clockView instanceof TextView) {
+            applyFontToTextView((TextView) clockView, session, cfg);
+        }
+        Object mClockView = HookValues.readField(root, "mClockView");
+        if (mClockView instanceof TextView) {
+            applyFontToTextView((TextView) mClockView, session, cfg);
+        }
+        if (root instanceof ViewGroup) {
+            ViewGroup vg = (ViewGroup) root;
+            for (int i = 0; i < vg.getChildCount(); i++) {
+                View child = vg.getChildAt(i);
+                if (child instanceof TextView && isLockScreenClockView(child)) {
+                    applyFontToTextView((TextView) child, session, cfg);
+                } else if (child instanceof ViewGroup) {
+                    applyFontToClockHierarchy(child, session, cfg);
+                }
+            }
+        }
+    }
+
+    private static boolean isLockScreenClockView(Object obj) {
+        if (!(obj instanceof View)) return false;
+        View view = (View) obj;
+        if (sSavedContext == null && view.getContext() != null) {
+            sSavedContext = view.getContext().getApplicationContext();
+        }
+        try {
+            if (view.getId() == 0x7f0b02c7) return true;
+            if (view.getId() != View.NO_ID && view.getResources() != null) {
+                String name = view.getResources().getResourceEntryName(view.getId());
+                if ("clock_view".equals(name) || "keyguard_clock_view".equals(name)
+                        || "lockscreen_clock".equals(name)) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {}
+
+        ViewParent parent = view.getParent();
+        int depth = 0;
+        while (parent instanceof View && depth++ < 6) {
+            View pv = (View) parent;
+            String pvClassName = pv.getClass().getName();
+            if (pvClassName.contains("LockScreenClock")
+                    || pvClassName.contains("AodClock")
+                    || pvClassName.contains("ClockStatusView")
+                    || pvClassName.contains("KeyguardStatusView")) {
+                if (view instanceof TextView) return true;
+            }
+            try {
+                if (pv.getId() != View.NO_ID && pv.getResources() != null) {
+                    String pname = pv.getResources().getResourceEntryName(pv.getId());
+                    if ("keyguard_clock_container".equals(pname)
+                            || "keyguard_clock_style_default".equals(pname)
+                            || "clock_area".equals(pname)
+                            || pname.startsWith("keyguard_clock_style")) {
+                        if (view instanceof TextView) return true;
+                    }
+                }
+            } catch (Throwable ignored) {}
+            parent = pv.getParent();
+        }
+        return false;
+    }
+
+    private static Typeface getLockscreenTypeface(android.content.Context context, HookSession session, ModuleConfig config) {
+        String systemFontPath = config.getString("lockscreen_system_font_path", "");
+        String importedFontName = config.getString("lockscreen_custom_font_imported_name", "");
+        int weight = config.getIntFlexible("lockscreen_custom_font_weight", 400);
+        long timestamp = config.getLong("lockscreen_custom_font_timestamp", 0L);
+
+        Context ctx = context != null ? context : getAnyContext();
+        String cacheKey = (systemFontPath == null ? "" : systemFontPath) + "|"
+                + (importedFontName == null ? "" : importedFontName) + "|"
+                + weight + "|" + timestamp;
+        if (sCachedTypeface != null && cacheKey.equals(sCachedFontKey)) {
+            return sCachedTypeface;
+        }
+
+        Typeface baseTypeface = null;
+        // Priority 1: System-installed font (highest priority)
+        if (systemFontPath != null && !systemFontPath.trim().isEmpty()) {
+            File fontFile = new File(systemFontPath.trim());
+            if (fontFile.exists() && fontFile.canRead()) {
+                try {
+                    baseTypeface = Typeface.createFromFile(fontFile);
+                    session.logSmali("Landroid/graphics/Typeface;->createFromFile(Ljava/io/File;)Landroid/graphics/Typeface;",
+                            "LOADED system font: " + systemFontPath);
+                } catch (Throwable t) {
+                    session.logSmali("Landroid/graphics/Typeface;->createFromFile(Ljava/io/File;)Landroid/graphics/Typeface;",
+                            "FAILED to load system font: " + t.getMessage());
+                }
+            }
+        }
+
+        // Priority 2: Custom imported font
+        if (baseTypeface == null && ctx != null && importedFontName != null && !importedFontName.trim().isEmpty()) {
+            File cacheFile = new File(ctx.getCacheDir(), "lockscreen_" + Math.abs(importedFontName.hashCode()) + (timestamp > 0 ? ("_" + timestamp) : "") + ".ttf");
+            if (!cacheFile.exists() || cacheFile.length() == 0) {
+                try {
+                    android.net.Uri fontUri = android.net.Uri.parse("content://dev.lackluster.redmagichelper.config_provider/font");
+                    try (InputStream is = ctx.getContentResolver().openInputStream(fontUri);
+                         FileOutputStream fos = new FileOutputStream(cacheFile)) {
+                        if (is != null) {
+                            byte[] buffer = new byte[8192];
+                            int read;
+                            while ((read = is.read(buffer)) != -1) {
+                                fos.write(buffer, 0, read);
+                            }
+                            session.logSmali("Landroid/content/ContentResolver;->openInputStream(Landroid/net/Uri;)Ljava/io/InputStream;",
+                                    "CACHED imported font file size=" + cacheFile.length());
+                        }
+                    }
+                } catch (Throwable t) {
+                    session.logSmali("Landroid/content/ContentResolver;->openInputStream", "Stream fallback: " + t.getMessage());
+                    // Fallback to getCustomFontBytes bundle call
+                    try {
+                        android.net.Uri providerUri = android.net.Uri.parse("content://dev.lackluster.redmagichelper.config_provider");
+                        Bundle bundle = ctx.getContentResolver().call(providerUri, "getCustomFontBytes", null, null);
+                        if (bundle != null && bundle.getBoolean("success", false)) {
+                            byte[] bytes = bundle.getByteArray("font_bytes");
+                            if (bytes != null && bytes.length > 0) {
+                                try (FileOutputStream fos = new FileOutputStream(cacheFile)) {
+                                    fos.write(bytes);
+                                }
+                                session.logSmali("ConfigProvider->getCustomFontBytes", "CACHED imported font bytes=" + bytes.length);
+                            }
+                        }
+                    } catch (Throwable t2) {
+                        session.logSmali("ConfigProvider->getCustomFontBytes", "FAILED: " + t2.getMessage());
+                    }
+                }
+            }
+            if (cacheFile.exists() && cacheFile.length() > 0) {
+                try {
+                    baseTypeface = Typeface.createFromFile(cacheFile);
+                    session.logSmali("Landroid/graphics/Typeface;->createFromFile", "LOADED imported font: " + importedFontName);
+                } catch (Throwable t) {
+                    session.logSmali("Landroid/graphics/Typeface;->createFromFile", "FAILED to load imported font: " + t.getMessage());
+                }
+            }
+        }
+
+        if (baseTypeface == null) {
+            baseTypeface = Typeface.DEFAULT;
+        }
+
+        try {
+            int clampedWeight = HookValues.clamp(weight, 100, 1000);
+            sCachedTypeface = Typeface.create(baseTypeface, clampedWeight, false);
+            sCachedFontKey = cacheKey;
+            return sCachedTypeface;
+        } catch (Throwable t) {
+            sCachedTypeface = baseTypeface;
+            sCachedFontKey = cacheKey;
+            return baseTypeface;
+        }
     }
 
     private static void installFlagSecureBypass(HookSession session) {

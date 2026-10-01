@@ -64,8 +64,10 @@ public final class HookRuntimeLogStore {
         if (context == null) {
             return new ArrayList<>();
         }
-        readFile(new File(context.getFilesDir(), BACKUP_FILE), recent, charCount);
-        readFile(new File(context.getFilesDir(), LOG_FILE), recent, charCount);
+        int retentionDays = context.getSharedPreferences("config", Context.MODE_PRIVATE)
+                .getInt("log_retention_days", 7);
+        readFile(new File(context.getFilesDir(), BACKUP_FILE), recent, charCount, retentionDays);
+        readFile(new File(context.getFilesDir(), LOG_FILE), recent, charCount, retentionDays);
         return new ArrayList<>(recent);
     }
 
@@ -81,15 +83,20 @@ public final class HookRuntimeLogStore {
     private static void readFile(
             File file,
             ArrayDeque<String> recent,
-            int[] charCount
+            int[] charCount,
+            int retentionDays
     ) throws Exception {
         if (!file.isFile()) {
             return;
         }
+        long nowEpochDay = java.time.LocalDate.now().toEpochDay();
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
                 new FileInputStream(file), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
+                if (retentionDays > 0 && isLineExpired(line, retentionDays, nowEpochDay)) {
+                    continue;
+                }
                 if (line.length() > MAX_RETURN_CHARS) {
                     line = line.substring(line.length() - MAX_RETURN_CHARS);
                 }
@@ -101,6 +108,22 @@ public final class HookRuntimeLogStore {
                 recent.addLast(line);
                 charCount[0] += line.length();
             }
+        }
+    }
+
+    public static boolean isLineExpired(String line, int retentionDays, long nowEpochDay) {
+        if (retentionDays <= 0 || line == null || !line.startsWith("[")) {
+            return false;
+        }
+        int dateEnd = line.indexOf(' ');
+        if (dateEnd < 11) return false;
+        String dateStr = line.substring(1, dateEnd);
+        try {
+            java.time.LocalDate logDate = java.time.LocalDate.parse(dateStr);
+            long diff = nowEpochDay - logDate.toEpochDay();
+            return diff > retentionDays;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
