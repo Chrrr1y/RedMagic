@@ -1688,6 +1688,9 @@ private fun LockScreenFontSettingsScreen(
     var fontSize by remember(revision) {
         mutableIntStateOf(readNumber(preferences, "lockscreen_custom_font_size", 70))
     }
+    var dateSize by remember(revision) {
+        mutableIntStateOf(readNumber(preferences, "lockscreen_custom_date_size", 24))
+    }
 
     var systemFonts by remember { mutableStateOf<List<SystemFontItem>>(emptyList()) }
     var fontSearchQuery by remember { mutableStateOf("") }
@@ -1909,12 +1912,12 @@ private fun LockScreenFontSettingsScreen(
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = "10月1日 星期四 · 88%",
-                            style = MaterialTheme.typography.bodySmall,
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = dateSize.sp),
                             color = Color(0xFFE6E0E9)
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "字体粗细: $fontWeight (${getFontWeightName(fontWeight)}) | 设定大小: ${fontSize}px",
+                            text = "时间: ${fontSize}sp | 日期: ${dateSize}sp | 粗细: $fontWeight (${getFontWeightName(fontWeight)})",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFF938F99)
                         )
@@ -2209,7 +2212,7 @@ private fun LockScreenFontSettingsScreen(
 
                         Spacer(Modifier.height(12.dp))
 
-                        // Slider 2: Font Size (30 - 120 px)
+                        // Slider 2: Clock font size (30 - 120 sp)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -2226,7 +2229,7 @@ private fun LockScreenFontSettingsScreen(
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
-                                    text = "$fontSize px",
+                                    text = "$fontSize sp",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = colors.onPrimaryContainer,
@@ -2246,6 +2249,52 @@ private fun LockScreenFontSettingsScreen(
                             },
                             valueRange = 30f..120f,
                             steps = 44,
+                            colors = SliderDefaults.colors(
+                                thumbColor = colors.primary,
+                                activeTrackColor = colors.primary,
+                                inactiveTrackColor = colors.surfaceContainerHighest
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(Modifier.height(12.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "日期大小 (Size)",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.onSurface
+                            )
+                            Surface(
+                                color = colors.primaryContainer,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = "$dateSize sp",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = colors.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                        Slider(
+                            value = dateSize.toFloat(),
+                            onValueChange = { dateSize = it.roundToInt() },
+                            onValueChangeFinished = {
+                                val oldVal = readNumber(preferences, "lockscreen_custom_date_size", 24)
+                                if (oldVal != dateSize) {
+                                    preferences.edit().putInt("lockscreen_custom_date_size", dateSize).commit()
+                                    onPreferenceChanged("lockscreen_custom_date_size", oldVal, dateSize)
+                                }
+                            },
+                            valueRange = 12f..48f,
+                            steps = 35,
                             colors = SliderDefaults.colors(
                                 thumbColor = colors.primary,
                                 activeTrackColor = colors.primary,
@@ -2770,6 +2819,7 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
     "lockscreen_custom_font_timestamp",
     "lockscreen_custom_font_weight",
     "lockscreen_custom_font_size",
+    "lockscreen_custom_date_size",
     "statusbar_notif_max",
     "statusbar_notif_max_value",
     "remove_alert_windows_notification",
@@ -2894,7 +2944,13 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
 private fun restartPackages(packages: Collection<String>): Boolean {
     val pkgs = packages.filter { it.isNotBlank() }.distinct()
     if (pkgs.isEmpty()) return true
-    val command = pkgs.joinToString("; ") { "am force-stop $it" }
+    val command = pkgs.joinToString("; ") { pkg ->
+        if (pkg == "com.android.systemui") {
+            "pkill -f com.android.systemui"
+        } else {
+            "am force-stop $pkg"
+        }
+    }
     return try {
         val process = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
         try {

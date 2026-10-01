@@ -14,7 +14,7 @@ enum class SettingCategory(
     ),
     SYSTEM_UI(
         "系统界面",
-        "息屏与状态栏时钟、通知限制与录屏策略",
+        "锁屏与息屏时钟、状态栏通知与录屏策略",
         R.drawable.ic_header_systemui
     ),
     GAMING(
@@ -34,7 +34,7 @@ enum class SettingCategory(
     ),
     DESKTOP(
         "主题/桌面",
-        "锁屏时钟自定义字体、主题资源与桌面配置",
+        "主题资源与桌面配置",
         R.drawable.ic_header_home
     ),
     SETTINGS(
@@ -125,6 +125,7 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
         SettingItem.Toggle("禁用浏览器遥测与数据追踪", "browser_disable_telemetry", "拦截并彻底屏蔽 NuReport 埋点上报、热云统计、Umeng 广告追踪与南极星事件监控。")
     ),
     SettingCategory.SYSTEM_UI to listOf(
+        SettingItem.Action("锁屏时钟自定义字体", "lockscreen_custom_font_settings", "调整锁屏时间与日期大小、字体粗细和自定义字体。"),
         SettingItem.Toggle("息屏显示秒数", "systemui_screen_off_show_seconds", "在息屏 AOD 界面显示实时秒数。"),
         SettingItem.Toggle("息屏显示中文时段", "systemui_screen_off_period", "在息屏 AOD 时间前显示上午/下午/晚上。"),
         SettingItem.Toggle("下拉状态栏时钟显示中文时段", "statusbar_clock_pull_down_show_period", "下拉通知中心时钟附带中文时段。"),
@@ -178,7 +179,6 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
         SettingItem.Toggle("游戏中心本地超级会员", "neogame_local_svip", "在游戏中心本地状态模型中保持超级会员有效状态。")
     ),
     SettingCategory.DESKTOP to listOf(
-        SettingItem.Action("锁屏时钟自定义字体", "lockscreen_custom_font_settings", "开启后选择系统已安装字体、导入自定义字体，支持粗细与大小调节。"),
         SettingItem.Toggle("主题资源免登录并绕过广告/付费判断", "cancel_trial_login", "主题壁纸应用直接放行资源下载、试用和收费判断。"),
         SettingItem.Toggle("主题启动页跳过广告", "beautify_skip_splash_ads", "打开主题时直接进入主题首页，不显示启动广告页。"),
         SettingItem.Toggle("允许第三方桌面", "allow_thirdparty_launcher", "解除系统限制，支持将第三方 Launcher 设置为默认桌面。"),

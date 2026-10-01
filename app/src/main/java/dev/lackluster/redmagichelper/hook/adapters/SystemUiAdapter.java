@@ -30,6 +30,8 @@ public final class SystemUiAdapter implements HostAdapter {
             ThreadLocal.withInitial(() -> false);
     private static final ThreadLocal<Boolean> FONT_SIZE_GUARD =
             ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> DATE_SIZE_GUARD =
+            ThreadLocal.withInitial(() -> false);
 
     @Override
     public void install(HookSession session) {
@@ -135,7 +137,7 @@ public final class SystemUiAdapter implements HostAdapter {
             if (!cfg.getBoolean("lockscreen_custom_font_switch", false)) {
                 return chain.proceed();
             }
-            if (isLockScreenClockView(view)) {
+            if (isLockScreenClockOrDateView(view)) {
                 Context ctx = ((View) view).getContext();
                 Typeface customTf = getLockscreenTypeface(ctx, session, cfg);
                 if (customTf != null) {
@@ -153,7 +155,7 @@ public final class SystemUiAdapter implements HostAdapter {
             if (!cfg.getBoolean("lockscreen_custom_font_switch", false)) {
                 return chain.proceed();
             }
-            if (isLockScreenClockView(view)) {
+            if (isLockScreenClockOrDateView(view)) {
                 Context ctx = ((View) view).getContext();
                 Typeface customTf = getLockscreenTypeface(ctx, session, cfg);
                 if (customTf != null) {
@@ -170,24 +172,47 @@ public final class SystemUiAdapter implements HostAdapter {
         session.hook(TextView.class, "setTextSize", chain -> {
             Object view = chain.getThisObject();
             ModuleConfig cfg = session.config();
-            if (Boolean.TRUE.equals(FONT_SIZE_GUARD.get())
+            boolean isDate = isLockScreenDateView(view);
+            if ((!isDate && Boolean.TRUE.equals(FONT_SIZE_GUARD.get()))
+                    || (isDate && Boolean.TRUE.equals(DATE_SIZE_GUARD.get()))
                     || !cfg.getBoolean("lockscreen_custom_font_switch", false)
-                    || !isLockScreenClockView(view)
+                    || (!isDate && !isLockScreenClockView(view))
                     || !(view instanceof TextView)) {
                 return chain.proceed();
             }
             Object result = chain.proceed();
-            applyConfiguredTextSize((TextView) view, cfg);
+            if (isDate) {
+                applyConfiguredDateSize((TextView) view, cfg);
+            } else {
+                applyConfiguredTextSize((TextView) view, cfg);
+            }
             return result;
         }, int.class, float.class);
+
+        session.hook(TextView.class, "setTextSize", chain -> {
+            Object view = chain.getThisObject();
+            ModuleConfig cfg = session.config();
+            if (!(view instanceof TextView)
+                    || !cfg.getBoolean("lockscreen_custom_font_switch", false)
+                    || !isLockScreenClockOrDateView(view)
+                    || isSizeGuarded(view)) {
+                return chain.proceed();
+            }
+            Object result = chain.proceed();
+            applyConfiguredViewTextSize((TextView) view, cfg);
+            return result;
+        }, float.class);
 
         session.hook(TextView.class, "setTextAppearance", chain -> {
             Object result = chain.proceed();
             Object view = chain.getThisObject();
             ModuleConfig cfg = session.config();
-            if (cfg.getBoolean("lockscreen_custom_font_switch", false)
-                    && isLockScreenClockView(view) && view instanceof TextView) {
-                applyConfiguredTextSize((TextView) view, cfg);
+            if (cfg.getBoolean("lockscreen_custom_font_switch", false) && view instanceof TextView) {
+                if (isLockScreenDateView(view)) {
+                    applyConfiguredDateSize((TextView) view, cfg);
+                } else if (isLockScreenClockView(view)) {
+                    applyConfiguredTextSize((TextView) view, cfg);
+                }
             }
             return result;
         }, Context.class, int.class);
@@ -196,9 +221,12 @@ public final class SystemUiAdapter implements HostAdapter {
             Object result = chain.proceed();
             Object view = chain.getThisObject();
             ModuleConfig cfg = session.config();
-            if (cfg.getBoolean("lockscreen_custom_font_switch", false)
-                    && isLockScreenClockView(view) && view instanceof TextView) {
-                applyConfiguredTextSize((TextView) view, cfg);
+            if (cfg.getBoolean("lockscreen_custom_font_switch", false) && view instanceof TextView) {
+                if (isLockScreenDateView(view)) {
+                    applyConfiguredDateSize((TextView) view, cfg);
+                } else if (isLockScreenClockView(view)) {
+                    applyConfiguredTextSize((TextView) view, cfg);
+                }
             }
             return result;
         }, int.class);
@@ -208,7 +236,8 @@ public final class SystemUiAdapter implements HostAdapter {
             Object result = chain.proceed();
             Object viewObj = chain.getThisObject();
             ModuleConfig cfg = session.config();
-            if (cfg.getBoolean("lockscreen_custom_font_switch", false) && isLockScreenClockView(viewObj) && viewObj instanceof TextView) {
+            if (cfg.getBoolean("lockscreen_custom_font_switch", false)
+                    && isLockScreenClockOrDateView(viewObj) && viewObj instanceof TextView) {
                 applyFontToTextView((TextView) viewObj, session, cfg);
             }
             return result;
@@ -275,7 +304,7 @@ public final class SystemUiAdapter implements HostAdapter {
                 ModuleConfig cfg = session.config();
                 if (cfg.getBoolean("lockscreen_custom_font_switch", false)) {
                     Object arg1 = chain.getArgs().get(1);
-                    if (arg1 instanceof TextView && isLockScreenClockView(arg1)) {
+                    if (arg1 instanceof TextView && isLockScreenClockOrDateView(arg1)) {
                         applyFontToTextView((TextView) arg1, session, cfg);
                     }
                 }
@@ -287,7 +316,7 @@ public final class SystemUiAdapter implements HostAdapter {
                 ModuleConfig cfg = session.config();
                 if (cfg.getBoolean("lockscreen_custom_font_switch", false)) {
                     Object arg0 = chain.getArgs().get(0);
-                    if (arg0 instanceof TextView && isLockScreenClockView(arg0)) {
+                    if (arg0 instanceof TextView && isLockScreenClockOrDateView(arg0)) {
                         applyFontToTextView((TextView) arg0, session, cfg);
                     }
                 }
@@ -313,7 +342,7 @@ public final class SystemUiAdapter implements HostAdapter {
     }
 
     private static void applyFontToTextView(TextView tv, HookSession session, ModuleConfig cfg) {
-        if (tv == null) return;
+        if (tv == null || !isLockScreenClockOrDateView(tv)) return;
         Context ctx = tv.getContext();
         if (sSavedContext == null && ctx != null) {
             sSavedContext = ctx.getApplicationContext();
@@ -323,26 +352,88 @@ public final class SystemUiAdapter implements HostAdapter {
             if (customTf != null) {
                 tv.setTypeface(customTf);
             }
-            applyConfiguredTextSize(tv, cfg);
+            applyConfiguredViewTextSize(tv, cfg);
         });
     }
 
+    private static void applyConfiguredViewTextSize(TextView tv, ModuleConfig cfg) {
+        if (isLockScreenDateView(tv)) {
+            applyConfiguredDateSize(tv, cfg);
+        } else {
+            applyConfiguredTextSize(tv, cfg);
+        }
+    }
+
+    private static boolean isLockScreenClockOrDateView(Object view) {
+        return isLockScreenClockView(view) || isLockScreenDateView(view);
+    }
+
+    private static boolean isSizeGuarded(Object view) {
+        return isLockScreenDateView(view)
+                ? Boolean.TRUE.equals(DATE_SIZE_GUARD.get())
+                : Boolean.TRUE.equals(FONT_SIZE_GUARD.get());
+    }
+
     private static void applyConfiguredTextSize(TextView tv, ModuleConfig cfg) {
-        int fontSizePx = cfg.getIntFlexible("lockscreen_custom_font_size", 70);
-        if (tv == null || fontSizePx <= 0 || Boolean.TRUE.equals(FONT_SIZE_GUARD.get())) {
+        int fontSizeSp = cfg.getIntFlexible("lockscreen_custom_font_size", 70);
+        if (tv == null || fontSizeSp <= 0 || Boolean.TRUE.equals(FONT_SIZE_GUARD.get())) {
             return;
         }
         FONT_SIZE_GUARD.set(true);
         try {
-            tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, fontSizePx);
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp);
         } finally {
             FONT_SIZE_GUARD.set(false);
         }
     }
 
+    private static void applyConfiguredDateSize(TextView tv, ModuleConfig cfg) {
+        int dateSizeSp = cfg.getIntFlexible("lockscreen_custom_date_size", 24);
+        if (tv == null || dateSizeSp <= 0 || Boolean.TRUE.equals(DATE_SIZE_GUARD.get())) {
+            return;
+        }
+        DATE_SIZE_GUARD.set(true);
+        try {
+            tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, dateSizeSp);
+        } finally {
+            DATE_SIZE_GUARD.set(false);
+        }
+    }
+
+    private static boolean isLockScreenDateView(Object obj) {
+        if (!(obj instanceof View)) {
+            return false;
+        }
+        View view = (View) obj;
+        try {
+            if (view.getId() != View.NO_ID && view.getResources() != null) {
+                String name = view.getResources().getResourceEntryName(view.getId());
+                if ("date_view".equals(name) || name.contains("keyguard_date")) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        ViewParent parent = view.getParent();
+        int depth = 0;
+        while (parent instanceof View && depth++ < 5) {
+            View parentView = (View) parent;
+            try {
+                if (parentView.getId() != View.NO_ID && parentView.getResources() != null
+                        && "date_view_area".equals(parentView.getResources()
+                        .getResourceEntryName(parentView.getId()))) {
+                    return true;
+                }
+            } catch (Throwable ignored) {
+            }
+            parent = parentView.getParent();
+        }
+        return false;
+    }
+
     private static void applyFontToClockHierarchy(View root, HookSession session, ModuleConfig cfg) {
         if (root == null) return;
-        if (root instanceof TextView && isLockScreenClockView(root)) {
+        if (root instanceof TextView && isLockScreenClockOrDateView(root)) {
             applyFontToTextView((TextView) root, session, cfg);
         }
         View clockView = root.findViewById(0x7f0b02c7);
@@ -357,7 +448,7 @@ public final class SystemUiAdapter implements HostAdapter {
             ViewGroup vg = (ViewGroup) root;
             for (int i = 0; i < vg.getChildCount(); i++) {
                 View child = vg.getChildAt(i);
-                if (child instanceof TextView && isLockScreenClockView(child)) {
+                if (child instanceof TextView && isLockScreenClockOrDateView(child)) {
                     applyFontToTextView((TextView) child, session, cfg);
                 } else if (child instanceof ViewGroup) {
                     applyFontToClockHierarchy(child, session, cfg);
