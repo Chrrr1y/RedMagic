@@ -4,10 +4,7 @@ import android.content.Context;
 import android.graphics.Typeface;
 import android.os.Bundle;
 import android.text.TextUtils;
-import android.view.Gravity;
 import android.util.TypedValue;
-import android.widget.FrameLayout;
-import android.widget.LinearLayout;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewParent;
@@ -294,8 +291,6 @@ public final class SystemUiAdapter implements HostAdapter {
                             applyFontToClockHierarchy((View) target, session, cfg);
                         }
                     }
-                    applyThemeIndependentLayoutIfEnabled(
-                            chain.getThisObject(), session.config());
                     return result;
                 });
             }
@@ -341,142 +336,9 @@ public final class SystemUiAdapter implements HostAdapter {
                         applyFontToClockHierarchy((View) target, session, cfg);
                     }
                 }
-                applyThemeIndependentLayoutIfEnabled(target, session.config());
                 return result;
             });
         }
-    }
-
-    private static void applyThemeIndependentLayoutIfEnabled(
-            Object target,
-            ModuleConfig config
-    ) {
-        if (!config.getBoolean("lockscreen_ignore_theme_layout", false)
-                || !(target instanceof View)) {
-            return;
-        }
-        View root = findKeyguardRoot((View) target);
-        if (root == null) {
-            return;
-        }
-        root.post(() -> {
-            arrangeThemeIndependentLayout(root);
-            root.postDelayed(() -> arrangeThemeIndependentLayout(root), 120L);
-        });
-    }
-
-    private static View findKeyguardRoot(View target) {
-        View current = target;
-        for (int depth = 0; current != null && depth < 12; depth++) {
-            if (hasResourceName(current, "keyguard_status_view")
-                    || hasResourceName(current, "keyguard_root_view")) {
-                return current;
-            }
-            ViewParent parent = current.getParent();
-            current = parent instanceof View ? (View) parent : null;
-        }
-        return target.getRootView();
-    }
-
-    private static void arrangeThemeIndependentLayout(View root) {
-        try {
-            View date = findByResourceName(root, "date_view_area", "date_view");
-            View clock = findByResourceName(root, "clock_area", "clock_view");
-            View weather = findByResourceName(root, "keyguard_widget_container_id");
-            View signature = findByResourceName(root, "keyguard_indication_area");
-
-            ViewParent commonParent = date == null ? null : date.getParent();
-            if (commonParent instanceof ViewGroup && clock != null
-                    && clock.getParent() == commonParent
-                    && weather != null && weather.getParent() == commonParent) {
-                ViewGroup parent = (ViewGroup) commonParent;
-                centerHorizontally(date);
-                centerHorizontally(clock);
-                centerHorizontally(weather);
-                int gap = Math.max(8, Math.round(parent.getResources()
-                        .getDisplayMetrics().density * 8f));
-                int totalHeight = date.getHeight() + clock.getHeight() + weather.getHeight()
-                        + gap * 2;
-                float top = Math.max(0f, (parent.getHeight() - totalHeight) / 2f);
-                date.setY(top);
-                clock.setY(top + date.getHeight() + gap);
-                weather.setY(top + date.getHeight() + gap + clock.getHeight() + gap);
-                date.setTranslationY(0f);
-                clock.setTranslationY(0f);
-                weather.setTranslationY(0f);
-            } else {
-                centerHorizontally(date);
-                centerHorizontally(clock);
-                centerHorizontally(weather);
-            }
-            if (signature != null) {
-                centerHorizontally(signature);
-                ViewParent parent = signature.getParent();
-                if (parent instanceof View) {
-                    View parentView = (View) parent;
-                    signature.setY(Math.max(0f, parentView.getHeight()
-                            - signature.getHeight() - dp(signature, 32)));
-                }
-            }
-        } catch (Throwable ignored) {
-            // Theme-specific containers can be detached during a transition.
-        }
-    }
-
-    private static void centerHorizontally(View view) {
-        if (view == null) {
-            return;
-        }
-        ViewParent parent = view.getParent();
-        if (parent instanceof View) {
-            View parentView = (View) parent;
-            view.setX(Math.max(0f, (parentView.getWidth() - view.getWidth()) / 2f));
-            view.setTranslationX(0f);
-        }
-        if (view instanceof TextView) {
-            ((TextView) view).setGravity(Gravity.CENTER);
-        } else if (view instanceof LinearLayout) {
-            ((LinearLayout) view).setGravity(Gravity.CENTER_HORIZONTAL);
-        }
-        ViewGroup.LayoutParams params = view.getLayoutParams();
-        if (params instanceof FrameLayout.LayoutParams) {
-            ((FrameLayout.LayoutParams) params).gravity = Gravity.CENTER_HORIZONTAL;
-            view.setLayoutParams(params);
-        }
-    }
-
-    private static View findByResourceName(View root, String... names) {
-        if (root == null) {
-            return null;
-        }
-        for (String name : names) {
-            if (hasResourceName(root, name)) {
-                return root;
-            }
-        }
-        if (root instanceof ViewGroup) {
-            ViewGroup group = (ViewGroup) root;
-            for (int i = 0; i < group.getChildCount(); i++) {
-                View result = findByResourceName(group.getChildAt(i), names);
-                if (result != null) {
-                    return result;
-                }
-            }
-        }
-        return null;
-    }
-
-    private static boolean hasResourceName(View view, String expected) {
-        try {
-            return view.getId() != View.NO_ID
-                    && expected.equals(view.getResources().getResourceEntryName(view.getId()));
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    private static int dp(View view, int value) {
-        return Math.round(value * view.getResources().getDisplayMetrics().density);
     }
 
     private static void applyFontToTextView(TextView tv, HookSession session, ModuleConfig cfg) {

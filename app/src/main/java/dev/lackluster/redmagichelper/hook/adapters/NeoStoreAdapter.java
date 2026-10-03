@@ -9,16 +9,14 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
-import java.util.Map;
-import java.util.List;
-
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Map;
 
 import dev.lackluster.redmagichelper.hook.HostAdapter;
 import dev.lackluster.redmagichelper.hook.HookSession;
 
-/** NeoStore & NeoGameCenter download queue and ad removal adaptation. */
+/** NeoStore & NeoGameCenter download, splash, and account adaptation. */
 public final class NeoStoreAdapter implements HostAdapter {
     @Override
     public void install(HookSession session) {
@@ -32,16 +30,6 @@ public final class NeoStoreAdapter implements HostAdapter {
                 : session.config().neostoreSkipSplash();
         if (skipSplash) {
             installSplashBypass(session);
-        }
-
-        boolean removeAds = gameCenter
-                ? session.config().neogamecenterRemoveRecommendAds()
-                : session.config().neostoreRemoveRecommendAds();
-        if (removeAds) {
-            installAdRemoval(session);
-            if (gameCenter) {
-                installGameCenterAdRemoval(session);
-            }
         }
 
         if ("cn.nubia.neostore".equals(session.packageName())

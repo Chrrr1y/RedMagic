@@ -107,14 +107,6 @@ public final class ModuleConfig {
         return getBoolean("neogamecenter_skip_splash", false);
     }
 
-    public boolean neostoreRemoveRecommendAds() {
-        return getBoolean("neostore_remove_recommend_ads", false);
-    }
-
-    public boolean neogamecenterRemoveRecommendAds() {
-        return getBoolean("neogamecenter_remove_recommend_ads", false);
-    }
-
     public boolean neostoreAutoSign() {
         return getBoolean("neostore_auto_sign", false);
     }

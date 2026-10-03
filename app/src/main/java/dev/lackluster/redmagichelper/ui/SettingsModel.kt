@@ -170,9 +170,7 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
     ),
     SettingCategory.STORE to listOf(
         SettingItem.Toggle("应用中心跳过开屏广告", "neostore_skip_splash", "仅作用于 cn.nubia.neostore。"),
-        SettingItem.Toggle("应用中心去除推荐广告", "neostore_remove_recommend_ads", "隐藏应用中心推荐卡片与 SSP 广告。"),
         SettingItem.Toggle("游戏中心跳过开屏广告", "neogamecenter_skip_splash", "仅作用于 cn.nubia.neogamecenter。"),
-        SettingItem.Toggle("游戏中心去除推荐广告", "neogamecenter_remove_recommend_ads", "阻断游戏中心开屏、轮播和推荐广告请求。"),
         SettingItem.Toggle("应用商店下载启用多线程", "neostore_download_enabled", "按设定线程数创建应用商店与游戏中心的下载队列。"),
         SettingItem.Number("下载线程数（1-32）", "neostore_download_count", 5, "同时使用的下载线程数，默认 5。", "neostore_download_enabled"),
         SettingItem.Toggle("应用中心自动签到", "neostore_auto_sign", "进入应用中心后查询签到状态，未签到时调用应用中心自己的签到接口。"),
