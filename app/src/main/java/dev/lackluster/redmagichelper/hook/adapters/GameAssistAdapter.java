@@ -249,20 +249,31 @@ public final class GameAssistAdapter implements HostAdapter {
             Class<?> superResolution = session.findOptionalClass(
                     "cn.nubia.plugin.superresolution.SuperResolutionViewController");
             if (superResolution != null) {
-                // E(int) is parsed as decimal limits: tens caps image quality,
-                // ones caps frame rate. G() clamps the saved tier to each cap.
-                // Widen this boundary too so a stale/cached upstream cap cannot
-                // collapse frameRate_ultra back to frameRate_super.
+                // The service packs interpolation in the tens digit and
+                // super-resolution in the ones digit. E() stores those digits
+                // as j/k, while G() uses j for imageQuality and k for
+                // frameRate. Remap the capability at this boundary so the
+                // controller does not clamp a selected frameRate_ultra back
+                // to frameRate_super.
                 session.hook(superResolution, "E", chain -> {
                     int capability = HookValues.intArg(chain, 0, 0);
-                    int expanded = GfrcCapabilityPolicy.includeUltraModes(capability);
+                    int expanded = GfrcCapabilityPolicy.forGameAssistController(capability);
                     if (expanded == capability) {
                         return chain.proceed();
                     }
-                    session.log("GAME_ASSIST_GFRC_CONTROLLER_CAP_EXPANDED from="
+                    session.log("GAME_ASSIST_GFRC_CONTROLLER_CAP_REMAP from="
                             + capability + " to=" + expanded);
                     return HookValues.proceedWithArgument(chain, 0, expanded);
                 }, int.class);
+                // G() can be reached later from the settings observer with
+                // cached j/k values and without another E() call. Keep both
+                // exposed controller tiers available on that path as well.
+                session.hook(superResolution, "G", chain -> {
+                    Object owner = chain.getThisObject();
+                    HookValues.writeField(owner, 2, "j");
+                    HookValues.writeField(owner, 2, "k");
+                    return chain.proceed();
+                }, String.class, String.class);
 
                 // x(package, value) is the final package/value gate used when SuperResolution settings are applied
                 session.hook(superResolution, "x", chain -> {

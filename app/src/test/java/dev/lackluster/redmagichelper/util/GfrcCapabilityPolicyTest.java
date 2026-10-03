@@ -17,4 +17,12 @@ public class GfrcCapabilityPolicyTest {
         assertEquals(22, GfrcCapabilityPolicy.includeUltraModes(22));
         assertEquals(32, GfrcCapabilityPolicy.includeUltraModes(31));
     }
+
+    @Test
+    public void remapsServicePackingForGameAssistController() {
+        assertEquals(22, GfrcCapabilityPolicy.forGameAssistController(0));
+        assertEquals(23, GfrcCapabilityPolicy.forGameAssistController(31));
+        assertEquals(32, GfrcCapabilityPolicy.forGameAssistController(13));
+        assertEquals(22, GfrcCapabilityPolicy.forGameAssistController(21));
+    }
 }
