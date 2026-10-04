@@ -10,8 +10,13 @@ def releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
 def hasReleaseSigning = releaseStoreFile && releaseStorePassword
         && releaseKeyAlias && releaseKeyPassword
-def buildVersionCode = (System.getenv("VERSION_CODE") ?: "26091401").toInteger()
-def buildVersionName = System.getenv("VERSION_NAME") ?: "4.0.1-rewrite"
+def defaultVersionName = "4.0.1"
+def buildVersionName = (System.getenv("VERSION_NAME") ?: defaultVersionName)
+        .replaceFirst(/-rewrite$/, "")
+def autoVersionCode = (System.currentTimeMillis() / 1000L) as int
+def buildVersionCode = (System.getenv("VERSION_CODE") ?: autoVersionCode.toString()).toInteger()
+def buildReleaseTag = System.getenv("RELEASE_TAG")
+        ?: "v${buildVersionName}-build-${buildVersionCode}"
 
 android {
     namespace "dev.lackluster.redmagichelper"
@@ -65,6 +70,73 @@ android {
             excludes += ["META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*"]
         }
     }
+}
+
+def gitText = { List<String> arguments ->
+    try {
+        def output = new ByteArrayOutputStream()
+        def error = new ByteArrayOutputStream()
+        exec {
+            commandLine(["git"] + arguments)
+            standardOutput = output
+            errorOutput = error
+            ignoreExitValue = true
+        }
+        return output.toString("UTF-8").trim()
+    } catch (Throwable ignored) {
+        return ""
+    }
+}
+
+tasks.register("writeBuildMetadata") {
+    def metadataDir = layout.buildDirectory.dir("generated/version")
+    outputs.dir(metadataDir)
+    outputs.upToDateWhen { false }
+    doLast {
+        File outputDir = metadataDir.get().asFile
+        outputDir.mkdirs()
+
+        String commit = gitText(["rev-parse", "--short", "HEAD"])
+        if (commit.isEmpty()) {
+            commit = "unknown"
+        }
+        String previousTag = gitText([
+                "tag", "--list", "v*", "--sort=-creatordate"
+        ]).readLines().find { !it.trim().isEmpty() } ?: ""
+        String range = previousTag.isEmpty() ? "HEAD~20..HEAD" : "${previousTag}..HEAD"
+        String updates = gitText([
+                "log", "--no-merges", "--pretty=format:- %s (%h)", range
+        ])
+        if (updates.isEmpty()) {
+            updates = "- No commit summary available"
+        }
+        String timestamp = new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")
+
+        new File(outputDir, "version.properties").text = """\
+build.versionCode=${buildVersionCode}
+build.versionName=${buildVersionName}
+build.releaseTag=${buildReleaseTag}
+build.commit=${commit}
+build.timestamp=${timestamp}
+""".stripIndent()
+
+        new File(outputDir, "BUILD_NOTES.md").text = """\
+# RedMagic Helper ${buildVersionName}
+
+- Version code: `${buildVersionCode}`
+- Release tag: `${buildReleaseTag}`
+- Commit: `${commit}`
+- Built: `${timestamp}`
+
+## Updates
+
+${updates}
+""".stripIndent()
+    }
+}
+
+tasks.named("preBuild") {
+    dependsOn("writeBuildMetadata")
 }
 
 dependencies {

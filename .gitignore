@@ -28,6 +28,7 @@ render.experimental.xml
 # Local artifacts and upload metadata
 /dist/*.apk
 /dist/onlyfiles_url.txt
+/dist/release/
 *.onlyfiles.txt
 
 # Local signing material and service credentials

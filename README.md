@@ -16,23 +16,32 @@ LSPosed 的 system_server 作用域使用包名 `android`，已包含在 `scope.
 
 需要 JDK 17、Android SDK Platform 36 和网络连接以解析 Gradle 插件及依赖。
 
-运行单测并构建 Debug APK：
+构建 Debug APK：
 
 ```bash
-./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+./gradlew --no-daemon :app:assembleDebug
 ```
 
 Debug APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。构建不会自动上传 APK 到第三方文件服务。
 
-构建 Release APK：
+构建 Release APK、生成版本号、校验和和更新说明：
 
 ```bash
-./gradlew --no-daemon :app:assembleRelease
+./scripts/build-release.sh
 ```
+
+发布到 GitHub Release：
+
+```bash
+gh auth login
+./scripts/build-release.sh --publish
+```
+
+基础版本为 `4.0.1`，不会再带 `rewrite` 后缀。脚本会自动生成 `versionCode`，并将 APK、SHA-256 和 `RELEASE_NOTES.md` 写入 `dist/release/`。构建元数据同时写入 `app/build/generated/version/`。
 
 ## GitHub Release
 
-`.github/workflows/release.yml` 中的 `BuildApk` 工作流在每次推送到 `main` 后运行单测、构建 Release APK、生成 SHA-256 校验文件并创建 GitHub Release。也可以从 Actions 页面手动运行。每次运行递增 Android `versionCode`，Release 标签为 `build-<run number>`。
+正常发布不依赖 GitHub Actions；本地 `./scripts/build-release.sh --publish` 会直接调用 GitHub CLI 创建 Release。`.github/workflows/release.yml` 仅保留为手动触发的备用流程，不会因推送 `main` 消耗 Actions 额度。
 
 未配置签名 Secrets 时，Release 使用 GitHub runner 的临时 debug keystore，APK 可以安装，但不同 runner 的签名不保证相同，后续版本可能无法覆盖升级。要保持签名一致，请配置以下仓库 Secrets：
 

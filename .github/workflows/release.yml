@@ -1,9 +1,6 @@
 name: BuildApk
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -47,10 +44,7 @@ jobs:
       - name: Set build version
         shell: bash
         run: |
-          VERSION_CODE=$((26091400 + GITHUB_RUN_NUMBER))
-          VERSION_NAME="4.0.0-ci.${GITHUB_RUN_NUMBER}"
-          printf 'VERSION_CODE=%s\nVERSION_NAME=%s\n' \
-            "$VERSION_CODE" "$VERSION_NAME" >> "$GITHUB_ENV"
+          ./scripts/version.sh --env-file "$GITHUB_ENV"
 
       - name: Configure release signing
         shell: bash
@@ -69,20 +63,19 @@ jobs:
             echo "Release keystore secrets are incomplete; using the runner's debug key."
           fi
 
-      - name: Run tests and build release APK
-        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleRelease
+      - name: Build release APK
+        run: ./scripts/build-release.sh
 
       - name: Generate checksum
-        working-directory: app/build/outputs/apk/release
-        run: sha256sum app-release.apk > app-release.apk.sha256
+        run: test -s dist/release/*.sha256
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: RedMagic Helper build ${{ github.run_number }}
-          generate_release_notes: true
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: RedMagic Helper ${{ env.VERSION_NAME }} (${{ env.VERSION_CODE }})
+          body_path: dist/release/RELEASE_NOTES.md
           make_latest: true
           files: |
-            app/build/outputs/apk/release/app-release.apk
-            app/build/outputs/apk/release/app-release.apk.sha256
+            dist/release/*.apk
+            dist/release/*.sha256
