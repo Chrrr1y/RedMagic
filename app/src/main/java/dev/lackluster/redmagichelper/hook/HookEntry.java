@@ -59,8 +59,7 @@ public final class HookEntry extends XposedModule {
         // non-first PackageReadyParam even though it is the only callback for
         // system_server. Do not discard that callback; otherwise every
         // SystemServerAdapter feature silently remains uninstalled.
-        // Do not skip if this package or its process is one of our target adapters
-        if (!firstPackage && !"android".equals(packageName) && adapterFor(packageName) == null) {
+        if (!"android".equals(packageName) && adapterFor(packageName) == null) {
             return;
         }
         rememberTarget(packageName, param.getClassLoader(), param.getApplicationInfo());
@@ -157,13 +156,14 @@ public final class HookEntry extends XposedModule {
             return;
         }
 
-        HookSession session = new HookSession(this, packageName, classLoader, info, current);
-        if (!"android".equals(packageName)) {
-            installConfigProviderSync(session);
-        }
         HostAdapter adapter = adapterFor(packageName);
         if (adapter == null) {
             return;
+        }
+
+        HookSession session = new HookSession(this, packageName, classLoader, info, current);
+        if (!"android".equals(packageName)) {
+            installConfigProviderSync(session);
         }
         try {
             adapter.install(session);

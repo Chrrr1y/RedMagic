@@ -60,8 +60,7 @@ public final class LauncherAdapter implements HostAdapter {
         public void run() {
             TextView tv = sMemoryTextViewRef != null ? sMemoryTextViewRef.get() : null;
             ActivityManager am = sActivityManager;
-            if (tv == null || am == null) {
-                sMainHandler.postDelayed(this, 1000L);
+            if (tv == null || am == null || !tv.isAttachedToWindow()) {
                 return;
             }
             try {
@@ -509,6 +508,12 @@ public final class LauncherAdapter implements HostAdapter {
 
         updateMemoryTextColor(context, memoryTextView);
 
+        if (sDarkReceiver != null) {
+            try {
+                context.unregisterReceiver(sDarkReceiver);
+            } catch (Throwable ignored) {}
+            sDarkReceiver = null;
+        }
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context ctx, Intent intent) {
@@ -523,6 +528,19 @@ public final class LauncherAdapter implements HostAdapter {
             context.registerReceiver(receiver, new IntentFilter(Intent.ACTION_CONFIGURATION_CHANGED));
         } catch (Throwable ignored) {
         }
+
+        memoryTextView.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View v) {
+                sMainHandler.removeCallbacks(sMemoryUpdateRunnable);
+                sMainHandler.post(sMemoryUpdateRunnable);
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View v) {
+                sMainHandler.removeCallbacks(sMemoryUpdateRunnable);
+            }
+        });
 
         LinearLayout.LayoutParams tvParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);

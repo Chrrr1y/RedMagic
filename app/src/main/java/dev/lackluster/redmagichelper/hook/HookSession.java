@@ -6,7 +6,9 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -313,6 +315,8 @@ public final class HookSession {
         return loader == null ? "<bootstrap>" : loader.getClass().getName();
     }
 
+    private static final ThreadLocal<Set<Integer>> ACTIVE_HOOKS =
+            ThreadLocal.withInitial(HashSet::new);
     private static final AtomicInteger HOOK_SEQUENCE = new AtomicInteger();
 
     public void hook(Method method, HookCallback callback) {
@@ -324,16 +328,17 @@ public final class HookSession {
         } catch (Throwable ignored) {
             // LibXposed can still hook some inaccessible framework methods.
         }
+        final int hookId = HOOK_SEQUENCE.incrementAndGet();
         String id = "rmh-rewrite/" + packageName + "/" + method.getDeclaringClass().getName()
                 + "#" + method.getName() + "/" + method.getParameterCount()
-                + "#" + HOOK_SEQUENCE.incrementAndGet();
+                + "#" + hookId;
         try {
-            ThreadLocal<Boolean> inProgress = new ThreadLocal<>();
             HookCallback normalizedCallback = chain -> {
-                if (Boolean.TRUE.equals(inProgress.get())) {
+                Set<Integer> active = ACTIVE_HOOKS.get();
+                if (active.contains(hookId)) {
                     return chain.proceed();
                 }
-                inProgress.set(Boolean.TRUE);
+                active.add(hookId);
                 try {
                     Object value = callback.intercept(chain);
                     if (value == null && method.getReturnType().isPrimitive()
@@ -342,7 +347,10 @@ public final class HookSession {
                     }
                     return value;
                 } finally {
-                    inProgress.remove();
+                    active.remove(hookId);
+                    if (active.isEmpty()) {
+                        ACTIVE_HOOKS.remove();
+                    }
                 }
             };
             XposedInterface.HookHandle handle = module.hook(method)

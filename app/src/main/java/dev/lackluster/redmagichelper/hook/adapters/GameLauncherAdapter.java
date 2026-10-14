@@ -94,52 +94,43 @@ public final class GameLauncherAdapter implements HostAdapter {
             if (pkgUtils != null) {
                 session.hook(pkgUtils, "getGamePkgList", chain -> {
                     Object orig = chain.proceed();
-                    final java.util.List<?> originalList = (orig instanceof java.util.List)
+                    java.util.List<?> originalList = (orig instanceof java.util.List)
                             ? (java.util.List<?>) orig : java.util.Collections.emptyList();
+                    java.util.ArrayList<Object> resultList = new java.util.ArrayList<>(originalList);
+                    if (!resultList.contains("com.tencent.tmgp.sgame")) {
+                        resultList.add("com.tencent.tmgp.sgame");
+                    }
+                    if (!resultList.contains("com.tencent.tmgp.dfm")) {
+                        resultList.add("com.tencent.tmgp.dfm");
+                    }
                     Context ctx = (Context) HookValues.arg(chain, 0);
-                    return new java.util.AbstractList<Object>() {
-                        @Override
-                        public Object get(int index) {
-                            return originalList.get(index);
-                        }
-                        @Override
-                        public int size() {
-                            return originalList.size();
-                        }
-                        @Override
-                        public boolean contains(Object o) {
-                            if (originalList.contains(o)) {
-                                return true;
-                            }
-                            if (o instanceof String) {
-                                String s = (String) o;
-                                if (isIgnoredLinePackage(s)) {
-                                    return false;
-                                }
-                                if ("com.tencent.tmgp.sgame".equals(s) || "com.tencent.tmgp.dfm".equals(s)) {
-                                    return true;
-                                }
-                                if (ctx != null) {
-                                    try {
-                                        String enabledPkgs = Settings.Global.getString(ctx.getContentResolver(), "gamehelperline_enable_pkgs");
-                                        if (enabledPkgs != null && enabledPkgs.contains(s)) {
-                                            return true;
-                                        }
-                                    } catch (Throwable ignored) {}
+                    if (ctx != null) {
+                        try {
+                            String enabledPkgs = Settings.Global.getString(
+                                    ctx.getContentResolver(), "gamehelperline_enable_pkgs");
+                            if (enabledPkgs != null && !enabledPkgs.isEmpty()) {
+                                for (String pkg : enabledPkgs.split(",")) {
+                                    String trimmed = pkg.trim();
+                                    if (!trimmed.isEmpty() && !isIgnoredLinePackage(trimmed)
+                                            && !resultList.contains(trimmed)) {
+                                        resultList.add(trimmed);
+                                    }
                                 }
                             }
-                            return false;
-                        }
-                    };
+                        } catch (Throwable ignored) {}
+                    }
+                    return resultList;
                 }, Context.class);
             }
 
             session.log("GAME_AUX_LINE_SUPPORT_CHECKS_BYPASSED");
         }
 
-        installSafeEntryHooks(session, shoulderEnabled, comboEnabled, comboSpeedEnabled,
-                superResolutionEnabled, forceOverlay, globalBlacklistBypass);
-        session.log("GAME_LAUNCHER_SAFE_ENTRY_HOOKS_INSTALLED");
+        if (!"cn.nubia.gamehelperline".equals(session.packageName())) {
+            installSafeEntryHooks(session, shoulderEnabled, comboEnabled, comboSpeedEnabled,
+                    superResolutionEnabled, forceOverlay, globalBlacklistBypass);
+            session.log("GAME_LAUNCHER_SAFE_ENTRY_HOOKS_INSTALLED");
+        }
     }
 
     private static void installSafeEntryHooks(

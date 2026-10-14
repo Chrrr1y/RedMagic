@@ -61,26 +61,23 @@ public final class SystemUiAdapter implements HostAdapter {
         if (config.getBoolean("remove_alert_windows_notification", false)) {
             installAlertWindowNotificationBypass(session);
         }
-        installLockScreenClockFont(session);
+        if (config.getBoolean("lockscreen_custom_font_switch", false)) {
+            installLockScreenClockFont(session);
+        }
         installNotificationLimit(session);
         session.log("SYSTEMUI_CAPABILITY_SCAN_COMPLETE");
     }
 
     private static Typeface sCachedTypeface = null;
     private static String sCachedFontKey = "";
-    private static volatile Context sSavedContext = null;
 
     private static Context getAnyContext() {
-        if (sSavedContext != null) {
-            return sSavedContext;
-        }
         try {
             Class<?> atCls = Class.forName("android.app.ActivityThread");
             Method m = atCls.getMethod("currentApplication");
             Object app = m.invoke(null);
             if (app instanceof Context) {
-                sSavedContext = ((Context) app).getApplicationContext();
-                return sSavedContext;
+                return ((Context) app).getApplicationContext();
             }
         } catch (Throwable ignored) {}
         try {
@@ -88,8 +85,7 @@ public final class SystemUiAdapter implements HostAdapter {
             Method m = appTools.getMethod("getAppContext");
             Object ctx = m.invoke(null);
             if (ctx instanceof Context) {
-                sSavedContext = ((Context) ctx).getApplicationContext();
-                return sSavedContext;
+                return ((Context) ctx).getApplicationContext();
             }
         } catch (Throwable ignored) {}
         return null;
@@ -304,12 +300,86 @@ public final class SystemUiAdapter implements HostAdapter {
         }
     }
 
+    private static final byte TAG_NONE = 1;
+    private static final byte TAG_CLOCK = 2;
+    private static final byte TAG_DATE = 3;
+    private static final byte TAG_AOD = 4;
+
+    private static final java.util.Map<View, Byte> sViewClassificationCache =
+            new java.util.WeakHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<Integer, String> sResNameCache =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static String getResourceEntryNameFast(View view) {
+        int id = view.getId();
+        if (id == View.NO_ID) {
+            return "";
+        }
+        String cached = sResNameCache.get(id);
+        if (cached != null) {
+            return cached;
+        }
+        try {
+            android.content.res.Resources res = view.getResources();
+            if (res != null) {
+                String name = res.getResourceEntryName(id);
+                if (name != null) {
+                    sResNameCache.put(id, name);
+                    return name;
+                }
+            }
+        } catch (Throwable ignored) {}
+        sResNameCache.put(id, "");
+        return "";
+    }
+
+    private static boolean containsIgnoreCase(String str, String search) {
+        if (str == null || search == null) return false;
+        final int len = search.length();
+        final int max = str.length() - len;
+        for (int i = 0; i <= max; i++) {
+            if (str.regionMatches(true, i, search, 0, len)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static byte classifyView(View view) {
+        if (view == null) {
+            return TAG_NONE;
+        }
+        Byte cached;
+        synchronized (sViewClassificationCache) {
+            cached = sViewClassificationCache.get(view);
+        }
+        if (cached != null) {
+            return cached.byteValue();
+        }
+
+        byte result = computeViewClassification(view);
+        synchronized (sViewClassificationCache) {
+            sViewClassificationCache.put(view, Byte.valueOf(result));
+        }
+        return result;
+    }
+
+    private static byte computeViewClassification(View view) {
+        if (isAodViewInternal(view)) {
+            return TAG_AOD;
+        }
+        if (isLockScreenDateViewInternal(view)) {
+            return TAG_DATE;
+        }
+        if (isLockScreenClockViewInternal(view)) {
+            return TAG_CLOCK;
+        }
+        return TAG_NONE;
+    }
+
     private static void applyFontToTextView(TextView tv, HookSession session, ModuleConfig cfg) {
         if (tv == null || !isLockScreenClockOrDateView(tv)) return;
         Context ctx = tv.getContext();
-        if (sSavedContext == null && ctx != null) {
-            sSavedContext = ctx.getApplicationContext();
-        }
         Typeface customTf = getLockscreenTypeface(ctx, session, cfg);
         HookValues.runOnMain(tv, () -> {
             if (customTf != null) {
@@ -328,7 +398,11 @@ public final class SystemUiAdapter implements HostAdapter {
     }
 
     private static boolean isLockScreenClockOrDateView(Object view) {
-        return isLockScreenClockView(view) || isLockScreenDateView(view);
+        if (!(view instanceof View)) {
+            return false;
+        }
+        byte tag = classifyView((View) view);
+        return tag == TAG_CLOCK || tag == TAG_DATE;
     }
 
     private static boolean isSizeGuarded(Object view) {
@@ -364,30 +438,28 @@ public final class SystemUiAdapter implements HostAdapter {
     }
 
     private static boolean isLockScreenDateView(Object obj) {
-        if (!(obj instanceof View) || isAodView(obj)) {
+        if (!(obj instanceof View)) {
             return false;
         }
-        View view = (View) obj;
-        try {
-            if (view.getId() != View.NO_ID && view.getResources() != null) {
-                String name = view.getResources().getResourceEntryName(view.getId());
-                if ("date_view".equals(name) || name.contains("keyguard_date")) {
-                    return true;
-                }
+        return classifyView((View) obj) == TAG_DATE;
+    }
+
+    private static boolean isLockScreenDateViewInternal(View view) {
+        if (view.getId() != View.NO_ID) {
+            String name = getResourceEntryNameFast(view);
+            if ("date_view".equals(name) || name.contains("keyguard_date")) {
+                return true;
             }
-        } catch (Throwable ignored) {
         }
         ViewParent parent = view.getParent();
         int depth = 0;
         while (parent instanceof View && depth++ < 5) {
             View parentView = (View) parent;
-            try {
-                if (parentView.getId() != View.NO_ID && parentView.getResources() != null
-                        && "date_view_area".equals(parentView.getResources()
-                        .getResourceEntryName(parentView.getId()))) {
+            if (parentView.getId() != View.NO_ID) {
+                String pname = getResourceEntryNameFast(parentView);
+                if ("date_view_area".equals(pname)) {
                     return true;
                 }
-            } catch (Throwable ignored) {
             }
             parent = parentView.getParent();
         }
@@ -421,28 +493,26 @@ public final class SystemUiAdapter implements HostAdapter {
     }
 
     private static boolean isLockScreenClockView(Object obj) {
-        if (!(obj instanceof View) || isAodView(obj)) return false;
-        View view = (View) obj;
-        if (sSavedContext == null && view.getContext() != null) {
-            sSavedContext = view.getContext().getApplicationContext();
-        }
-        try {
-            if (view.getId() == 0x7f0b02c7) return true;
-            if (view.getId() != View.NO_ID && view.getResources() != null) {
-                String name = view.getResources().getResourceEntryName(view.getId());
-                if ("clock_view".equals(name) || "keyguard_clock_view".equals(name)
-                        || "lockscreen_clock".equals(name)) {
-                    return true;
-                }
+        if (!(obj instanceof View)) return false;
+        return classifyView((View) obj) == TAG_CLOCK;
+    }
+
+    private static boolean isLockScreenClockViewInternal(View view) {
+        if (view.getId() == 0x7f0b02c7) return true;
+        if (view.getId() != View.NO_ID) {
+            String name = getResourceEntryNameFast(view);
+            if ("clock_view".equals(name) || "keyguard_clock_view".equals(name)
+                    || "lockscreen_clock".equals(name)) {
+                return true;
             }
-        } catch (Throwable ignored) {}
+        }
 
         ViewParent parent = view.getParent();
         int depth = 0;
         while (parent instanceof View && depth++ < 6) {
             View pv = (View) parent;
             String pvClassName = pv.getClass().getName();
-            if (isAodView(pv)) {
+            if (containsIgnoreCase(pvClassName, "aod") || containsIgnoreCase(pvClassName, "doze")) {
                 return false;
             }
             if (pvClassName.contains("LockScreenClock")
@@ -450,17 +520,15 @@ public final class SystemUiAdapter implements HostAdapter {
                     || pvClassName.contains("KeyguardStatusView")) {
                 if (view instanceof TextView) return true;
             }
-            try {
-                if (pv.getId() != View.NO_ID && pv.getResources() != null) {
-                    String pname = pv.getResources().getResourceEntryName(pv.getId());
-                    if ("keyguard_clock_container".equals(pname)
-                            || "keyguard_clock_style_default".equals(pname)
-                            || "clock_area".equals(pname)
-                            || pname.startsWith("keyguard_clock_style")) {
-                        if (view instanceof TextView) return true;
-                    }
+            if (pv.getId() != View.NO_ID) {
+                String pname = getResourceEntryNameFast(pv);
+                if ("keyguard_clock_container".equals(pname)
+                        || "keyguard_clock_style_default".equals(pname)
+                        || "clock_area".equals(pname)
+                        || pname.startsWith("keyguard_clock_style")) {
+                    if (view instanceof TextView) return true;
                 }
-            } catch (Throwable ignored) {}
+            }
             parent = pv.getParent();
         }
         return false;
@@ -470,27 +538,27 @@ public final class SystemUiAdapter implements HostAdapter {
         if (!(obj instanceof View)) {
             return false;
         }
-        View current = (View) obj;
-        for (int depth = 0; current != null && depth++ < 8; depth++) {
-            String className = current.getClass().getName().toLowerCase(Locale.ROOT);
-            if (className.contains("aod")
-                    || className.contains("doze")
-                    || className.contains("alwaysondisplay")
-                    || className.contains("screenoff")) {
+        return classifyView((View) obj) == TAG_AOD;
+    }
+
+    private static boolean isAodViewInternal(View view) {
+        View current = view;
+        for (int depth = 0; current != null && depth < 8; depth++) {
+            String className = current.getClass().getName();
+            if (containsIgnoreCase(className, "aod")
+                    || containsIgnoreCase(className, "doze")
+                    || containsIgnoreCase(className, "alwaysondisplay")
+                    || containsIgnoreCase(className, "screenoff")) {
                 return true;
             }
-            try {
-                if (current.getId() != View.NO_ID) {
-                    String resourceName = current.getResources()
-                            .getResourceEntryName(current.getId()).toLowerCase(Locale.ROOT);
-                    if (resourceName.contains("aod")
-                            || resourceName.contains("doze")
-                            || resourceName.contains("screen_off")
-                            || resourceName.contains("screenoff")) {
-                        return true;
-                    }
+            if (current.getId() != View.NO_ID) {
+                String resourceName = getResourceEntryNameFast(current);
+                if (containsIgnoreCase(resourceName, "aod")
+                        || containsIgnoreCase(resourceName, "doze")
+                        || containsIgnoreCase(resourceName, "screen_off")
+                        || containsIgnoreCase(resourceName, "screenoff")) {
+                    return true;
                 }
-            } catch (Throwable ignored) {
             }
             ViewParent parent = current.getParent();
             current = parent instanceof View ? (View) parent : null;
