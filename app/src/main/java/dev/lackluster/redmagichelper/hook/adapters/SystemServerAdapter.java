@@ -204,7 +204,8 @@ public final class SystemServerAdapter implements HostAdapter {
 
         boolean gameOverlayAllowed = session.config().getBoolean("game_force_overlay_capability", false)
                 || session.config().getBoolean("game_fuction_unfreeze_switch", false)
-                || session.config().getBoolean("game_shoulder_key_enabled", false);
+                || session.config().getBoolean("game_shoulder_key_enabled", false)
+                || session.config().getBoolean("game_safe_feature_gate", false);
         if (gameOverlayAllowed) {
             Class<?> appOpsService = session.findOptionalClass("com.android.server.appop.AppOpsService");
             if (appOpsService != null) {

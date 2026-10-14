@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="app_splash_background">#FEF7FF</color>
+    <color name="app_splash_icon_background">#EADDFF</color>
+    <color name="app_splash_logo_color">#6750A4</color>
     <color name="ic_stat_sys_tint_bg">#ffe6e6e6</color>
     <color name="ic_stat_sys_tint_fg">#ff4d4d4d</color>
 </resources>

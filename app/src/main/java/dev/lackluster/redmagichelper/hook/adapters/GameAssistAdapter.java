@@ -18,35 +18,48 @@ public final class GameAssistAdapter implements HostAdapter {
         installFixedScreenStateGuard(session);
 
         boolean unfreeze = session.config().gameFeaturesEnabled();
+        boolean globalBlacklistBypass = session.config().getBoolean(
+                "game_safe_feature_gate", false);
         boolean shoulderEnabled = session.config().getBoolean(
                 "game_shoulder_key_enabled", false)
-                || session.config().getBoolean("game_assist_shoulder_enabled", false);
+                || session.config().getBoolean("game_assist_shoulder_enabled", false)
+                || globalBlacklistBypass;
         boolean comboEnabled = session.config().getBoolean(
-                "game_space_combo_speed_enabled", false);
+                "game_space_combo_speed_enabled", false) || globalBlacklistBypass;
+        boolean vibrationUnlimited = session.config().getBoolean(
+                "game_4d_vibration_unlimited_apps", false);
         boolean superResolutionUnlimited = session.config().gameSuperResolutionUnlimitedApps();
+        boolean suppressSuperResolutionToasts = session.config().getBoolean(
+                "game_super_resolution_suppress_toasts", false);
         boolean forceOverlay = session.config().getBoolean("game_force_overlay_capability", false);
         boolean voiceUnfreeze = session.config().getBoolean("game_magic_voice_unfreeze", false);
         boolean soundUnfreeze = session.config().getBoolean("game_space_sound_effects_unfreeze", false);
         boolean sightUnfreeze = session.config().getBoolean("game_sight_assist_unfreeze", false);
         boolean freeformUnfreeze = session.config().getBoolean("game_allow_third_party_freeform", false)
                 || forceOverlay;
-        boolean safeFeatureGate = shoulderEnabled || comboEnabled || superResolutionUnlimited || forceOverlay
-                || voiceUnfreeze || soundUnfreeze || sightUnfreeze || freeformUnfreeze || unfreeze;
+        boolean safeFeatureGate = globalBlacklistBypass || shoulderEnabled || comboEnabled
+                || superResolutionUnlimited || vibrationUnlimited || forceOverlay
+                || voiceUnfreeze || soundUnfreeze || sightUnfreeze || freeformUnfreeze || unfreeze
+                || suppressSuperResolutionToasts;
         if (!safeFeatureGate) {
             session.log("GAME_FEATURES_DISABLED");
             return;
         }
 
+        SuperResolutionToastPolicy.install(session, suppressSuperResolutionToasts);
+
         // RedMagicOS stores the final per-game deny list in Settings.Global
         // and consults it after the Java capability checks. The stock value
         // contains package-specific entries for keylink/range-line, which is
         // why a successful TGK hook can still be blocked. Return an empty deny
-        // list only for the three explicitly supported entries.
+        // list for explicitly enabled entries, or all features when the
+        // global bypass switch is enabled.
         session.hook(Settings.Global.class, "getString", chain -> {
             Object key = HookValues.arg(chain, 1);
             if (key instanceof String) {
                 String strKey = (String) key;
-                if (isSafeBlacklistKey(strKey, shoulderEnabled, comboEnabled, superResolutionUnlimited)) {
+                if (isSafeBlacklistKey(strKey, shoulderEnabled, comboEnabled,
+                        superResolutionUnlimited, vibrationUnlimited, globalBlacklistBypass)) {
                     session.log("GAME_ASSIST_GLOBAL_BLACKLIST_BYPASSED key=" + key);
                     return "";
                 }
@@ -462,11 +475,9 @@ public final class GameAssistAdapter implements HostAdapter {
         }
 
         // Utils.k() builds the source tile list and calls the private
-        // Utils.d(ArrayList) capability filter before PluginConfig.g() is
-        // reached.  On devices whose ROM feature flags are false this filter
-        // removes the shoulder-key and super-resolution specs outright.  Put
-        // back only the entries explicitly enabled in this module; do not
-        // touch the other OEM tiles.
+        // Utils.d(ArrayList) capability filter runs before PluginConfig.g().
+        // Restore only entries enabled by this module after the OEM filter;
+        // leave all other OEM tiles untouched.
         Class<?> utils = session.findOptionalClass(
                 "cn.nubia.gameassist.utils.Utils");
         if (utils != null) {
@@ -479,6 +490,7 @@ public final class GameAssistAdapter implements HostAdapter {
                 addFeatureEntry(entries, "range_line", shoulderEnabled);
                 addFeatureEntry(entries, "operation_devices", shoulderEnabled);
                 addFeatureEntry(entries, "keylink", comboEnabled);
+                addFeatureEntry(entries, "vibrate", vibrationUnlimited);
                 addFeatureEntry(entries, "super_resolution", superResolutionUnlimited);
                 return entries;
             }, ArrayList.class);
@@ -578,8 +590,8 @@ public final class GameAssistAdapter implements HostAdapter {
         // is initialized, so the global getter is not reached again.
         session.hook(pluginConfig, "d", chain -> {
             Object feature = HookValues.arg(chain, 1);
-            if (isSafeFeature(feature, shoulderEnabled, comboEnabled,
-                    superResolutionUnlimited)) {
+            if (globalBlacklistBypass || isSafeFeature(feature, shoulderEnabled, comboEnabled,
+                    superResolutionUnlimited, vibrationUnlimited)) {
                 session.log("GAME_ASSIST_PLUGIN_BLACKLIST_BYPASSED feature=" + feature);
                 return new String[0];
             }
@@ -591,7 +603,7 @@ public final class GameAssistAdapter implements HostAdapter {
         session.hook(pluginConfig, "l", chain -> {
             Object feature = HookValues.arg(chain, 1);
             if (!isSafeFeature(feature, shoulderEnabled, comboEnabled,
-                    superResolutionUnlimited)) {
+                    superResolutionUnlimited, vibrationUnlimited)) {
                 return chain.proceed();
             }
             if ("range_line".equals(feature)) {
@@ -617,11 +629,32 @@ public final class GameAssistAdapter implements HostAdapter {
             addUiEntry(entries, (Context) context, "range_line", shoulderEnabled);
             addUiEntry(entries, (Context) context, "operation_devices", shoulderEnabled);
             addUiEntry(entries, (Context) context, "keylink", comboEnabled);
+            addUiEntry(entries, (Context) context, "vibrate", vibrationUnlimited);
             addUiEntry(entries, (Context) context, "super_resolution",
                     superResolutionUnlimited);
             return entries;
         }, Context.class);
         session.log("GAME_ASSIST_SAFE_ENTRY_HOOKS_INSTALLED");
+
+        if (vibrationUnlimited) {
+            Class<?> vibrateTile = session.findOptionalClass(
+                    "cn.nubia.gameassist.plugin.tiles.VibrateTile");
+            if (vibrateTile != null) {
+                // The tile recalculates package support on each game change.
+                // Keep the OEM vibration implementation and current toggle
+                // state while bypassing only its per-package capability gate.
+                session.hook(vibrateTile, "I0", chain -> {
+                    HookValues.writeField(chain.getThisObject(), Boolean.TRUE, "x");
+                    return Boolean.TRUE;
+                });
+                session.hook(vibrateTile, "w", chain -> {
+                    Object result = chain.proceed();
+                    HookValues.writeField(chain.getThisObject(), Boolean.TRUE, "w");
+                    return result;
+                }, boolean.class, android.net.Uri.class);
+                session.log("GAME_ASSIST_4D_VIBRATION_ALL_APPS_ENABLED");
+            }
+        }
     }
 
     /**
@@ -718,7 +751,11 @@ public final class GameAssistAdapter implements HostAdapter {
 
     private static boolean isSafeBlacklistKey(
             String key, boolean shoulderEnabled, boolean comboEnabled,
-            boolean superResolutionEnabled) {
+            boolean superResolutionEnabled, boolean vibrationEnabled,
+            boolean globalBlacklistBypass) {
+        if (globalBlacklistBypass && key.startsWith("game_assist_black_list_")) {
+            return true;
+        }
         if ("game_assist_black_list_range_line".equals(key)) {
             return shoulderEnabled;
         }
@@ -726,14 +763,17 @@ public final class GameAssistAdapter implements HostAdapter {
                 || "game_assist_black_list_touch_long_keylink_point".equals(key)) {
             return comboEnabled;
         }
-        return ("game_assist_black_list_super_resolution".equals(key)
+        if (("game_assist_black_list_super_resolution".equals(key)
                 || "game_assist_black_list_super_resolution_old".equals(key))
-                && superResolutionEnabled;
+                && superResolutionEnabled) {
+            return true;
+        }
+        return "game_assist_black_list_vibrate".equals(key) && vibrationEnabled;
     }
 
     private static boolean isSafeFeature(
             Object feature, boolean shoulderEnabled, boolean comboEnabled,
-            boolean superResolutionEnabled) {
+            boolean superResolutionEnabled, boolean vibrationEnabled) {
         if (!(feature instanceof String)) {
             return false;
         }
@@ -743,6 +783,9 @@ public final class GameAssistAdapter implements HostAdapter {
         }
         if ("keylink".equals(value) || "touch_long_keylink_point".equals(value)) {
             return comboEnabled;
+        }
+        if ("vibrate".equals(value)) {
+            return vibrationEnabled;
         }
         return ("super_resolution".equals(value) || "super_resolution_old".equals(value))
                 && superResolutionEnabled;

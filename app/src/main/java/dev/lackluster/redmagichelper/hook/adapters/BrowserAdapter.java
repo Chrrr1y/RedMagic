@@ -144,6 +144,8 @@ public final class BrowserAdapter implements HostAdapter {
             "activeContent",
             "active_banner"
     };
+    private static final Set<String> HOME_HOT_NEWS_ID_SET = new HashSet<>(
+            java.util.Arrays.asList(HOME_HOT_NEWS_IDS));
 
 
     /**
@@ -168,6 +170,7 @@ public final class BrowserAdapter implements HostAdapter {
             new WeakHashMap<>();
     private static final Map<View, Boolean> SEARCH_SHORTCUTS_CLEANED =
             new WeakHashMap<>();
+    private static final Map<View, Integer> DYNAMIC_CLEANUP_ROOTS = new WeakHashMap<>();
     private static final AtomicReference<WeakReference<Object>> ACTIVE_POP_MENU =
             new AtomicReference<>(null);
 
@@ -195,6 +198,10 @@ public final class BrowserAdapter implements HostAdapter {
         }
         if (session.config().browserRemoveHomePageInfo()) {
             installHomePageInfoRemoval(session);
+        }
+        if (session.config().browserRemoveHomePageInfo()
+                || session.config().browserRemoveHotWords()) {
+            installHomeHotNewsRemoval(session);
         }
         if (session.config().browserSlimMine()) {
             installMineSlimming(session);
@@ -799,6 +806,36 @@ public final class BrowserAdapter implements HostAdapter {
             }
             return result;
         });
+
+        // Catch home widgets assembled after inflation as the browser returns
+        // to its launcher activity. One shared, bounded cleanup pass handles
+        // the OEM's delayed content without polling the full decor tree every
+        // 100 ms for 1.5 seconds.
+        Class<?> launcher = session.findOptionalClass("com.android.browser.BrowserLauncher");
+        if (launcher != null) {
+            session.hook(launcher, "onCreate", chain -> {
+                Object result = chain.proceed();
+                scheduleActivityHomeCleanup(session, chain.getThisObject());
+                return result;
+            }, Bundle.class);
+            session.hook(launcher, "onResume", chain -> {
+                Object result = chain.proceed();
+                scheduleActivityHomeCleanup(session, chain.getThisObject());
+                return result;
+            });
+        }
+    }
+
+    private static void scheduleActivityHomeCleanup(HookSession session, Object owner) {
+        if (owner instanceof Activity
+                && "com.android.browser.BrowserLauncher".equals(owner.getClass().getName())) {
+            try {
+                View decor = ((Activity) owner).getWindow().getDecorView();
+                scheduleHomeHotNewsCleanup(session, decor);
+            } catch (Throwable ignored) {
+                // The activity can be tearing down while the callback runs.
+            }
+        }
     }
 
     private static void hideHomePageInfoSetting(HookSession session, View root) {
@@ -1785,7 +1822,6 @@ public final class BrowserAdapter implements HostAdapter {
 
     private static void installSearchCleaning(HookSession session) {
         installSearchAdRemoval(session);
-        installHomeHotNewsRemoval(session);
         // The search page can recreate the title row after all view IDs have
         // already been cleaned. Remove the complete block at the moment its
         // text is bound, so only an orphaned “今日热榜” label cannot remain.
@@ -2609,17 +2645,11 @@ public final class BrowserAdapter implements HostAdapter {
     }
 
     private static void scheduleSearchDynamicCleanup(HookSession session, View root) {
-        if (root == null) {
-            return;
+        int modes = CLEANUP_SEARCH;
+        if (session.config().browserRemoveHomePageInfo()) {
+            modes |= CLEANUP_HOME;
         }
-        for (int attempt = 0; attempt <= 15; attempt++) {
-            final long delay = attempt * 100L;
-            root.postDelayed(() -> HookValues.runOnMain(root, () -> {
-                cleanSearchViews(session, root);
-                Set<View> hidden = new HashSet<>();
-                collectHotNewsLabels(root, root, hidden);
-            }), delay);
-        }
+        scheduleDynamicCleanup(session, root, modes);
     }
 
     private static void hideSearchDynamicParts(HookSession session, Object owner) {
@@ -2690,12 +2720,50 @@ public final class BrowserAdapter implements HostAdapter {
      * bounded window around a plain launch/search transition.
      */
     private static void scheduleHomeHotNewsCleanup(HookSession session, View root) {
+        scheduleDynamicCleanup(session, root, CLEANUP_HOME);
+    }
+
+    private static final int CLEANUP_HOME = 1;
+    private static final int CLEANUP_SEARCH = 1 << 1;
+
+    private static void scheduleDynamicCleanup(HookSession session, View root, int modes) {
         if (root == null) {
             return;
         }
-        for (int attempt = 0; attempt <= 15; attempt++) {
-            final long delay = attempt * 100L;
-            root.postDelayed(() -> hideHomeHotNews(session, root), delay);
+        synchronized (DYNAMIC_CLEANUP_ROOTS) {
+            int scheduledModes = DYNAMIC_CLEANUP_ROOTS.getOrDefault(root, 0);
+            if ((scheduledModes & modes) == modes) {
+                return;
+            }
+            DYNAMIC_CLEANUP_ROOTS.put(root, scheduledModes | modes);
+            if (scheduledModes != 0) {
+                return;
+            }
+        }
+
+        long[] delays = {0L, 120L, 350L, 800L};
+        for (int attempt = 0; attempt < delays.length; attempt++) {
+            final boolean lastAttempt = attempt == delays.length - 1;
+            root.postDelayed(() -> {
+                HookValues.runOnMain(root, () -> {
+                    int activeModes;
+                    synchronized (DYNAMIC_CLEANUP_ROOTS) {
+                        activeModes = DYNAMIC_CLEANUP_ROOTS.getOrDefault(root, 0);
+                    }
+                    if ((activeModes & CLEANUP_SEARCH) != 0) {
+                        cleanSearchViews(session, root);
+                        collectHotNewsLabels(root, root);
+                    }
+                    if ((activeModes & CLEANUP_HOME) != 0) {
+                        hideHomeHotNews(session, root);
+                    }
+                });
+                if (lastAttempt) {
+                    synchronized (DYNAMIC_CLEANUP_ROOTS) {
+                        DYNAMIC_CLEANUP_ROOTS.remove(root);
+                    }
+                }
+            }, delays[attempt]);
         }
     }
 
@@ -2704,28 +2772,47 @@ public final class BrowserAdapter implements HostAdapter {
             return;
         }
         HookValues.runOnMain(root, () -> {
-            Set<View> hidden = new HashSet<>();
-            for (String id : HOME_HOT_NEWS_IDS) {
-                View view = HookValues.findView(root, session.packageName(), id);
-                if (view != null && view.getVisibility() != View.GONE) {
-                    view.setVisibility(View.GONE);
-                    hidden.add(view);
-                }
-            }
-            collectHotNewsLabels(root, root, hidden);
-            if (!hidden.isEmpty()) {
-                session.log("BROWSER_HOME_HOT_NEWS_VIEW_HIDDEN count=" + hidden.size());
-            }
+            collectHomeHotNews(root, root);
         });
     }
 
-    private static void collectHotNewsLabels(View view, View root, Set<View> hidden) {
+    private static void collectHomeHotNews(View view, View root) {
+        String resourceName = HookValues.resourceEntryName(view);
+        if (HOME_HOT_NEWS_ID_SET.contains(resourceName)
+                && view.getVisibility() != View.GONE) {
+            view.setVisibility(View.GONE);
+        }
+
         if (view instanceof TextView) {
             CharSequence value = ((TextView) view).getText();
             String text = value == null ? "" : value.toString().trim();
             if (isSearchHotNewsLabel(text)) {
                 hideSearchHotNewsBlock(view);
-                hidden.add(view);
+            } else if (isSearchActiveLabel(text)) {
+                View container = view;
+                for (int level = 0; level < 3
+                        && container.getParent() instanceof View
+                        && container != root; level++) {
+                    container = (View) container.getParent();
+                }
+                makeEmptyPreserveHeight(container);
+            }
+        }
+
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int i = 0; i < group.getChildCount(); i++) {
+                collectHomeHotNews(group.getChildAt(i), root);
+            }
+        }
+    }
+
+    private static void collectHotNewsLabels(View view, View root) {
+        if (view instanceof TextView) {
+            CharSequence value = ((TextView) view).getText();
+            String text = value == null ? "" : value.toString().trim();
+            if (isSearchHotNewsLabel(text)) {
+                hideSearchHotNewsBlock(view);
             } else if (isSearchActiveLabel(text)) {
                 View container = view;
                 for (int level = 0; level < 3
@@ -2735,14 +2822,13 @@ public final class BrowserAdapter implements HostAdapter {
                 }
                 if (container.getVisibility() != View.GONE) {
                     makeEmptyPreserveHeight(container);
-                    hidden.add(container);
                 }
             }
         }
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
             for (int i = 0; i < group.getChildCount(); i++) {
-                collectHotNewsLabels(group.getChildAt(i), root, hidden);
+                collectHotNewsLabels(group.getChildAt(i), root);
             }
         }
     }

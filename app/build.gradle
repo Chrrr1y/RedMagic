@@ -1,7 +1,7 @@
 plugins {
     id "com.android.application"
-    id "org.jetbrains.kotlin.android"
     id "org.jetbrains.kotlin.plugin.compose"
+    id "org.jetbrains.kotlin.plugin.serialization"
 }
 
 def releaseStoreFile = System.getenv("RELEASE_STORE_FILE")
@@ -10,7 +10,7 @@ def releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
 def hasReleaseSigning = releaseStoreFile && releaseStorePassword
         && releaseKeyAlias && releaseKeyPassword
-def defaultVersionName = "4.0.1"
+def defaultVersionName = "4.0.2"
 def buildVersionName = (System.getenv("VERSION_NAME") ?: defaultVersionName)
         .replaceFirst(/-rewrite$/, "")
 def autoVersionCode = (System.currentTimeMillis() / 1000L) as int
@@ -19,28 +19,24 @@ def buildReleaseTag = System.getenv("RELEASE_TAG")
         ?: "v${buildVersionName}-build-${buildVersionCode}"
 
 android {
-    namespace "dev.lackluster.redmagichelper"
-    compileSdk 36
+    namespace = "dev.lackluster.redmagichelper"
+    compileSdk = 37
 
     defaultConfig {
-        applicationId "dev.lackluster.redmagichelper"
-        minSdk 34
-        targetSdk 36
-        versionCode buildVersionCode
-        versionName buildVersionName
+        applicationId = "dev.lackluster.redmagichelper"
+        minSdk = 34
+        targetSdk = 36
+        versionCode = buildVersionCode
+        versionName = buildVersionName
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-
-    kotlinOptions {
-        jvmTarget = "17"
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
     }
 
     buildFeatures {
-        compose true
+        compose = true
     }
 
     lint {
@@ -50,18 +46,18 @@ android {
     signingConfigs {
         release {
             if (hasReleaseSigning) {
-                storeFile file(releaseStoreFile)
-                storePassword releaseStorePassword
-                keyAlias releaseKeyAlias
-                keyPassword releaseKeyPassword
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
 
     buildTypes {
         release {
-            signingConfig hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
-            minifyEnabled false
+            signingConfig = hasReleaseSigning ? signingConfigs.release : signingConfigs.debug
+            minifyEnabled = false
         }
     }
 
@@ -74,15 +70,12 @@ android {
 
 def gitText = { List<String> arguments ->
     try {
-        def output = new ByteArrayOutputStream()
-        def error = new ByteArrayOutputStream()
-        exec {
-            commandLine(["git"] + arguments)
-            standardOutput = output
-            errorOutput = error
-            ignoreExitValue = true
-        }
-        return output.toString("UTF-8").trim()
+        def process = new ProcessBuilder(["git"] + arguments)
+                .directory(rootProject.projectDir)
+                .redirectErrorStream(true)
+                .start()
+        String output = process.inputStream.getText("UTF-8")
+        return process.waitFor() == 0 ? output.trim() : ""
     } catch (Throwable ignored) {
         return ""
     }
@@ -144,11 +137,17 @@ dependencies {
     compileOnly files("libs/libxposed-api-102.0.0.jar")
     implementation files("libs/libxposed-service-102.0.0.jar")
     implementation files("libs/libxposed-interface-102.0.0.jar")
-    implementation "androidx.activity:activity-compose:1.10.1"
-    implementation "androidx.compose.ui:ui-android:1.8.3"
-    implementation "androidx.compose.foundation:foundation-android:1.8.3"
-    implementation "androidx.compose.material:material-android:1.8.3"
-    implementation "androidx.compose.material3:material3-android:1.3.2"
-    implementation "androidx.compose.runtime:runtime-android:1.8.3"
+    implementation "androidx.activity:activity-compose:1.13.0"
+    implementation platform("androidx.compose:compose-bom:2026.09.00")
+    implementation "androidx.compose.ui:ui-android"
+    implementation "androidx.compose.foundation:foundation-android"
+    implementation "androidx.compose.material:material-android"
+    implementation "androidx.compose.material3:material3-android:1.5.0-beta01"
+    implementation "androidx.compose.runtime:runtime-android"
+    implementation "androidx.core:core-splashscreen:1.0.1"
+    implementation "androidx.navigationevent:navigationevent-compose:1.1.2"
+    implementation "top.yukonga.miuix.kmp:miuix-nav-android:0.9.4"
+    implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0"
+    implementation "com.materialkolor:material-color-utilities:3.0.1"
     testImplementation files("libs/junit-4.13.2.jar", "libs/hamcrest-core-1.3.jar")
 }

@@ -23,6 +23,7 @@ render.experimental.xml
 # Device extraction and reverse-engineering workspace
 /offline/
 /scratch/
+/analysis/
 /.agents/
 
 # Local artifacts and upload metadata

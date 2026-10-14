@@ -6,6 +6,7 @@
     <application
         android:allowBackup="true"
         android:description="@string/xposed_desc"
+        android:enableOnBackInvokedCallback="true"
         android:icon="@drawable/redmagic_black"
         android:label="@string/app_name"
         android:name=".HelperApplication"

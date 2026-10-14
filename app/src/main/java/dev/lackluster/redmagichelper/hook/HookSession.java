@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import dev.lackluster.redmagichelper.config.ModuleConfig;
 import dev.lackluster.redmagichelper.util.HookLog;
@@ -36,6 +37,8 @@ public final class HookSession {
     private final AtomicInteger installedHooks = new AtomicInteger();
     private final AtomicInteger missingCapabilities = new AtomicInteger();
     private final AtomicInteger failedHooks = new AtomicInteger();
+    private final AtomicReference<String> firstFailure = new AtomicReference<>();
+    private final AtomicReference<Throwable> firstFailureCause = new AtomicReference<>();
 
     public HookSession(
             XposedModule module,
@@ -260,7 +263,13 @@ public final class HookSession {
 
     private void recordMissing(String detail) {
         missingCapabilities.incrementAndGet();
-        HookLog.missing(packageName, detail);
+    }
+
+    public void recordFailure(String detail, Throwable error) {
+        if (failedHooks.getAndIncrement() == 0) {
+            firstFailure.set(detail);
+            firstFailureCause.set(error);
+        }
     }
 
     private static String parameterNames(Class<?>[] parameters) {
@@ -342,17 +351,25 @@ public final class HookSession {
             handles.add(handle);
             installedHooks.incrementAndGet();
         } catch (Throwable error) {
-            failedHooks.incrementAndGet();
-            HookLog.error(packageName, "HOOK_FAILED " + method, error);
+            recordFailure("HOOK_FAILED " + method, error);
         }
     }
 
     public void log(String message) {
-        HookLog.info(packageName, message);
+        if (isErrorMessage(message)) {
+            HookLog.error(packageName, message, null);
+        }
     }
 
     public void logSmali(String smaliNode, String action) {
-        HookLog.info(packageName, "[" + smaliNode + "] " + action);
+        if (isErrorMessage(action)) {
+            HookLog.error(packageName, smaliNode + " " + action, null);
+        }
+    }
+
+    private static boolean isErrorMessage(String message) {
+        return message != null && (message.contains("FAILED") || message.contains("_ERROR")
+                || message.contains("ERROR") || message.contains("EXCEPTION"));
     }
 
     public void missing(String capability) {
@@ -360,16 +377,8 @@ public final class HookSession {
     }
 
     public void logScanSummary() {
-        String apkPath = applicationInfo == null || applicationInfo.sourceDir == null
-                ? "<system-or-unavailable>" : applicationInfo.sourceDir;
-        int missing = missingCapabilities.get();
-        if (missing > 0) {
-            HookLog.warn(packageName, "HOOK_SCAN_CAPABILITY_WARNINGS missing=" + missing
-                    + "; details are in the helper app logs");
-        }
-        HookLog.info(packageName, "HOOK_SCAN_SUMMARY installed="
-                + installedHooks.get() + " missing=" + missing
-                + " failed=" + failedHooks.get() + " apk=" + apkPath);
+        HookLog.hookResult(packageName, installedHooks.get(), missingCapabilities.get(),
+                failedHooks.get(), firstFailure.get(), firstFailureCause.get());
     }
 
     public void unhookAll() {
@@ -377,7 +386,7 @@ public final class HookSession {
             try {
                 handle.unhook();
             } catch (Throwable error) {
-                HookLog.error(packageName, "UNHOOK_FAILED", error);
+                recordFailure("UNHOOK_FAILED", error);
             }
         }
         handles.clear();
@@ -428,7 +437,6 @@ public final class HookSession {
         if (context == null || config == null) {
             return;
         }
-        HookLog.attachContentResolver(context.getContentResolver());
         try {
             android.os.Bundle res = context.getContentResolver().call(
                     dev.lackluster.redmagichelper.config.ConfigProvider.CONTENT_URI,
@@ -438,7 +446,6 @@ public final class HookSession {
             );
             if (res != null) {
                 config.updateFromProvider(res);
-                HookLog.info(packageName, "CONFIG_SYNC_FROM_PROVIDER_SUCCESS keys=" + res.keySet().size());
             }
         } catch (Throwable t) {
             HookLog.error(packageName, "CONFIG_SYNC_FROM_PROVIDER_FAIL", t);

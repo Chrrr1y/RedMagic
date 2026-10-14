@@ -16,17 +16,26 @@ public final class GameLauncherAdapter implements HostAdapter {
 
     @Override
     public void install(HookSession session) {
+        boolean globalBlacklistBypass = session.config().getBoolean(
+                "game_safe_feature_gate", false);
         boolean shoulderEnabled = session.config().getBoolean(
                 "game_shoulder_key_enabled", false)
-                || session.config().getBoolean("game_assist_shoulder_enabled", false);
-        boolean comboEnabled = session.config().getBoolean(
+                || session.config().getBoolean("game_assist_shoulder_enabled", false)
+                || globalBlacklistBypass;
+        boolean comboSpeedEnabled = session.config().getBoolean(
                 "game_space_combo_speed_enabled", false);
+        boolean comboEnabled = comboSpeedEnabled || globalBlacklistBypass;
         boolean superResolutionEnabled = session.config().gameSuperResolutionUnlimitedApps();
+        boolean suppressSuperResolutionToasts = session.config().getBoolean(
+                "game_super_resolution_suppress_toasts", false);
         boolean forceOverlay = session.config().getBoolean("game_force_overlay_capability", false);
-        if (!shoulderEnabled && !comboEnabled && !superResolutionEnabled && !forceOverlay) {
+        if (!shoulderEnabled && !comboEnabled && !superResolutionEnabled && !forceOverlay
+                && !suppressSuperResolutionToasts) {
             session.log("GAME_FEATURES_DISABLED");
             return;
         }
+
+        SuperResolutionToastPolicy.install(session, suppressSuperResolutionToasts);
 
         // GameHelperLine has its own hard-coded RedMagic blacklist. For
         // 王者荣耀 it returns true from this method and LineService stops
@@ -128,13 +137,15 @@ public final class GameLauncherAdapter implements HostAdapter {
             session.log("GAME_AUX_LINE_SUPPORT_CHECKS_BYPASSED");
         }
 
-        installSafeEntryHooks(session, shoulderEnabled, comboEnabled, superResolutionEnabled, forceOverlay);
+        installSafeEntryHooks(session, shoulderEnabled, comboEnabled, comboSpeedEnabled,
+                superResolutionEnabled, forceOverlay, globalBlacklistBypass);
         session.log("GAME_LAUNCHER_SAFE_ENTRY_HOOKS_INSTALLED");
     }
 
     private static void installSafeEntryHooks(
             HookSession session, boolean shoulderEnabled, boolean comboEnabled,
-            boolean superResolutionEnabled, boolean forceOverlay) {
+            boolean comboSpeedEnabled, boolean superResolutionEnabled,
+            boolean forceOverlay, boolean globalBlacklistBypass) {
         Class<?> featureUtil = session.findOptionalClass(
                 "cn.nubia.common.util.FeatureUtil");
         if (featureUtil != null && (shoulderEnabled || comboEnabled)) {
@@ -203,6 +214,29 @@ public final class GameLauncherAdapter implements HostAdapter {
             session.log("GAME_KEY_ENTRY_RESTRICTIONS_DISABLED");
         }
 
+        if (shoulderEnabled) {
+            int rapidFireMultiplier = HookValues.clamp(session.config().getInt(
+                    "game_shoulder_rapid_fire_multiplier", 2), 1, 3);
+            if (rapidFireMultiplier > 1) {
+                // TGK's stock selector submits 2 / 5 / 10 for low / medium /
+                // high. The first argument identifies the key; the second is
+                // the repeat count. Scale only the repeat count so the mapped
+                // key stays intact (high defaults to 20).
+                Class<?> inputManager = session.findOptionalClass(
+                        "android.hardware.input.InputManager");
+                session.hook(inputManager, "setTgkRapidFireCount", chain -> {
+                    int fireCount = HookValues.intArg(chain, 1, 0);
+                    if (fireCount <= 0 || fireCount > 10) {
+                        return chain.proceed();
+                    }
+                    int boostedCount = Math.min(30, fireCount * rapidFireMultiplier);
+                    return HookValues.proceedWithArgument(chain, 1, boostedCount);
+                }, int.class, int.class);
+                session.log("GAME_SHOULDER_RAPID_FIRE_RATE_ENABLED multiplier="
+                        + rapidFireMultiplier);
+            }
+        }
+
         Class<?> tgkMap = session.findOptionalClass("cn.nubia.tgk.TgkMapView");
         if (tgkMap != null && (shoulderEnabled || comboEnabled)) {
             session.hook(tgkMap, "getGameKeyLinkMotionState", chain -> {
@@ -221,14 +255,17 @@ public final class GameLauncherAdapter implements HostAdapter {
                 Object result = chain.proceed();
                 Object key = HookValues.arg(chain, 1);
                 if (key instanceof String && isSafeEntryFeature(
-                        (String) key, shoulderEnabled, comboEnabled, superResolutionEnabled)) {
-                    return HookValues.removeKnownPackages(result);
+                        (String) key, shoulderEnabled, comboEnabled, superResolutionEnabled,
+                        globalBlacklistBypass)) {
+                    return globalBlacklistBypass
+                            ? emptyBlacklistLike(result)
+                            : HookValues.removeKnownPackages(result);
                 }
                 return result;
             }, Context.class, String.class);
         }
 
-        if (comboEnabled) {
+        if (comboSpeedEnabled) {
             int speedRate = HookValues.clamp(
                     session.config().getInt("game_space_combo_speed_rate", 1), 1, 10);
             if (speedRate > 1) {
@@ -270,7 +307,10 @@ public final class GameLauncherAdapter implements HostAdapter {
 
     private static boolean isSafeEntryFeature(
             String feature, boolean shoulderEnabled, boolean comboEnabled,
-            boolean superResolutionEnabled) {
+            boolean superResolutionEnabled, boolean globalBlacklistBypass) {
+        if (globalBlacklistBypass) {
+            return true;
+        }
         if ("range_line".equals(feature)) {
             return shoulderEnabled;
         }
@@ -280,6 +320,19 @@ public final class GameLauncherAdapter implements HostAdapter {
         return superResolutionEnabled
                 && ("super_resolution".equals(feature)
                 || "super_resolution_old".equals(feature));
+    }
+
+    private static Object emptyBlacklistLike(Object value) {
+        if (value instanceof String[]) {
+            return new String[0];
+        }
+        if (value instanceof java.util.Set<?>) {
+            return new java.util.HashSet<>();
+        }
+        if (value instanceof java.util.Collection<?>) {
+            return new java.util.ArrayList<>();
+        }
+        return value;
     }
 
     private static boolean isIgnoredLinePackage(String pkg) {

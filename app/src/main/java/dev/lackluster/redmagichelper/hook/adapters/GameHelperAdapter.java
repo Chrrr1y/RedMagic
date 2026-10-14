@@ -14,8 +14,10 @@ import dev.lackluster.redmagichelper.hook.HookSession;
 public final class GameHelperAdapter implements HostAdapter {
     @Override
     public void install(HookSession session) {
-        boolean comboEnabled = session.config().getBoolean(
+        boolean comboSpeedEnabled = session.config().getBoolean(
                 "game_space_combo_speed_enabled", false);
+        boolean comboEnabled = comboSpeedEnabled || session.config().getBoolean(
+                "game_safe_feature_gate", false);
         if (!comboEnabled) {
             session.log("GAME_HELPER_FEATURES_DISABLED");
             return;
@@ -72,12 +74,26 @@ public final class GameHelperAdapter implements HostAdapter {
         session.hook(touchProvider, "recordMotionCall", chain ->
                 adjustBundle(chain.proceed(), session));
 
+        if (comboSpeedEnabled) {
+            // The playback path checks this static switch before it reads
+            // RecordMotionBean.getSpeed(). On this ROM it is initialized to
+            // false and has no code path that turns it on, so overriding only
+            // getSpeed() never changes TravelAction's interval divisor.
+            Class<?> macroSwitch = session.findClass("cn.nubia.gamehelper.MacroSwitch");
+            session.hook(macroSwitch, "isSpeedModeEnable", chain -> Boolean.TRUE);
+        }
+
         Class<?> deviceUtil = session.findClass("cn.nubia.gamehelper.utils.DeviceUtil");
         session.hook(deviceUtil, "isUI85", chain -> Boolean.TRUE);
         Class<?> motionBean = session.findClass("cn.nubia.gamehelper.bean.RecordMotionBean");
-        int speed = HookValues.clamp(
-                session.config().getInt("game_space_combo_speed_rate", 1), 1, 10);
+        int speed = comboSpeedEnabled
+                ? HookValues.clamp(
+                        session.config().getInt("game_space_combo_speed_rate", 1), 1, 10)
+                : 1;
         session.hook(motionBean, "getSpeed", chain -> speed);
+        if (comboSpeedEnabled) {
+            session.log("GAME_HELPER_COMBO_PLAYBACK_SPEED_ENABLED rate=" + speed);
+        }
         session.hook(Settings.class, "canDrawOverlays", chain -> {
             Object context = HookValues.arg(chain, 0);
             if (context instanceof Context

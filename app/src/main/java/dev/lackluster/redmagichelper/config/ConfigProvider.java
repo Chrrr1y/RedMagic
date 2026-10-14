@@ -6,17 +6,14 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.Binder;
 import android.os.Bundle;
 import android.os.ParcelFileDescriptor;
-import android.os.Process;
 
 import java.io.FileNotFoundException;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.Set;
 
-import dev.lackluster.redmagichelper.util.HookRuntimeLogStore;
 
 /**
  * Cross-process configuration provider allowing all hooked target applications
@@ -38,41 +35,7 @@ public final class ConfigProvider extends ContentProvider {
         if (context == null) {
             return null;
         }
-        if ("appendHookLogs".equals(method)) {
-            ArrayList<String> lines = extras == null
-                    ? null : extras.getStringArrayList("lines");
-            if (lines == null || lines.size() > 64) {
-                return failure("invalid_log_batch");
-            }
-            ArrayList<String> boundedLines = new ArrayList<>(lines.size());
-            for (String line : lines) {
-                if (line != null) {
-                    boundedLines.add(line.length() > 4096 ? line.substring(0, 4096) : line);
-                }
-            }
-            try {
-                HookRuntimeLogStore.append(context, boundedLines);
-                return result(true);
-            } catch (Throwable error) {
-                return failure(error.getClass().getSimpleName() + ":" + error.getMessage());
-            }
-        } else if ("getHookLogs".equals(method)) {
-            if (Binder.getCallingUid() != Process.myUid()) {
-                return result(false);
-            }
-            try {
-                Bundle result = result(true);
-                result.putStringArrayList("lines", HookRuntimeLogStore.readRecent(context));
-                return result;
-            } catch (Throwable ignored) {
-                return failure(ignored.getClass().getSimpleName());
-            }
-        } else if ("clearHookLogs".equals(method)) {
-            if (Binder.getCallingUid() != Process.myUid()) {
-                return result(false);
-            }
-            return result(HookRuntimeLogStore.clear(context));
-        } else if ("getCustomFontBytes".equals(method)) {
+        if ("getCustomFontBytes".equals(method)) {
             java.io.File fontFile = new java.io.File(context.getFilesDir(), "custom_lockscreen_font.ttf");
             if (!fontFile.exists() || fontFile.length() == 0) {
                 return failure("font_not_found");

@@ -1,37 +1,45 @@
 @file:Suppress("INVISIBLE_REFERENCE", "INVISIBLE_MEMBER")
+@file:OptIn(androidx.compose.material3.ExperimentalMaterial3ExpressiveApi::class)
 
 package dev.lackluster.redmagichelper.ui
 
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.File
 import kotlin.math.roundToInt
+import androidx.navigationevent.NavigationEventDispatcher
+import androidx.navigationevent.NavigationEventDispatcherOwner
+import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
@@ -59,9 +67,9 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -70,18 +78,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialExpressiveTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MotionScheme
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
@@ -99,17 +108,23 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Typography
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -117,61 +132,74 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.materialkolor.dynamiccolor.ColorSpec
+import com.materialkolor.hct.Hct
+import com.materialkolor.scheme.DynamicScheme
+import com.materialkolor.scheme.SchemeContent
+import com.materialkolor.scheme.SchemeExpressive
+import com.materialkolor.scheme.SchemeFidelity
+import com.materialkolor.scheme.SchemeFruitSalad
+import com.materialkolor.scheme.SchemeMonochrome
+import com.materialkolor.scheme.SchemeNeutral
+import com.materialkolor.scheme.SchemeRainbow
+import com.materialkolor.scheme.SchemeTonalSpot
+import com.materialkolor.scheme.SchemeVibrant
 import dev.lackluster.redmagichelper.HelperApplication
 import dev.lackluster.redmagichelper.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import top.yukonga.miuix.kmp.nav.core.LocalNavTransitionScope
+import top.yukonga.miuix.kmp.nav.core.NavDisplay
+import top.yukonga.miuix.kmp.nav.core.NavDisplayEffects
+import top.yukonga.miuix.kmp.nav.core.NavKey
+import top.yukonga.miuix.kmp.nav.core.rememberNavBackStack
+import top.yukonga.miuix.kmp.nav.core.rememberNavSystemCornerRadius
+import androidx.compose.runtime.Immutable
+import top.yukonga.miuix.kmp.nav.transition.NavSwipeDirection
+import top.yukonga.miuix.kmp.nav.transition.NavTransitions
 
-/**
- * Internal APK adaptation and runtime event logger.
- * Stores live console events in an in-memory ring buffer without filesystem IO.
- */
-object AppLogger {
-    private val buffer = ArrayDeque<String>(500)
-
-    init {
-        log("INFO", "诊断引擎", "RedMagic Helper 适配诊断引擎已就绪 (v4.0.1)")
-        log("INFO", "系统环境", "运行架构: ${Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"} | Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
+@Immutable
+private data class AppearanceSettings(
+    val colorStyle: String = "TonalSpot",
+    val colorSpec: String = "SPEC_2025",
+    val predictiveBackEnabled: Boolean = false,
+    val horizontalBackEnabled: Boolean = true,
+    val pageScale: Float = 1f
+) {
+    companion object {
+        fun read(preferences: SharedPreferences) = AppearanceSettings(
+            colorStyle = preferences.getString("color_style", "TonalSpot") ?: "TonalSpot",
+            colorSpec = preferences.getString("color_spec", "SPEC_2025") ?: "SPEC_2025",
+            predictiveBackEnabled = preferences.getBoolean("predictive_back_enabled", false),
+            horizontalBackEnabled = preferences.getBoolean("horizontal_back_enabled", true),
+            pageScale = preferences.getFloat("page_scale", 1f).coerceIn(0.8f, 1.2f)
+        )
     }
-
-    @JvmStatic
-    @Synchronized
-    fun log(level: String, function: String, detail: String) {
-        val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
-        val entry = "[$time][$level][$function][$detail]"
-        if (buffer.size >= 500) {
-            buffer.removeFirst()
-        }
-        buffer.add(entry)
-    }
-
-    @JvmStatic
-    @Synchronized
-    fun log(tag: String, message: String) {
-        log("INFO", tag, message)
-    }
-
-    @JvmStatic
-    @Synchronized
-    fun clear() {
-        buffer.clear()
-    }
-
-    @JvmStatic
-    @Synchronized
-    fun getRecentLogs(): List<String> = buffer.toList()
 }
+
+private val colorStyleOptions = listOf(
+    "TonalSpot", "Neutral", "Vibrant", "Expressive", "Rainbow",
+    "FruitSalad", "Monochrome", "Fidelity", "Content"
+)
+
+private val colorSpecOptions = listOf("SPEC_2025", "SPEC_2021")
 
 /**
  * Main Activity implementing the Material 3 Expressive design specifications:
@@ -180,16 +208,59 @@ object AppLogger {
  * - TopAppBar: 64dp, "红魔助手" aligned left
  * - List: 72dp item height, 3dp spacing, outer corners 28dp, inner corners 8dp
  * - Split button: "重启" with dropdown menu for restart & cancel
- * - Bottom NavigationBar: 80dp, "首页", "日志", "关于"
+ * - Bottom NavigationBar: 80dp, "首页", "关于"
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        val splashScreen = installSplashScreen()
+        var splashContentReady = false
         super.onCreate(savedInstanceState)
-        val preferences = getSharedPreferences("config", MODE_PRIVATE)
+        splashScreen.setKeepOnScreenCondition { !splashContentReady }
+        enableEdgeToEdge()
+
+        // Unlock high refresh rate (120Hz / 144Hz) on supported displays
+        runCatching {
+            val currentDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display
+            } else {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay
+            }
+            val highestMode = currentDisplay?.supportedModes?.maxByOrNull { it.refreshRate }
+            if (highestMode != null) {
+                val lp = window.attributes
+                lp.preferredDisplayModeId = highestMode.modeId
+                lp.preferredRefreshRate = highestMode.refreshRate
+                window.attributes = lp
+            }
+        }
+
+        val featurePreferences = getSharedPreferences("config", MODE_PRIVATE)
+        val appearancePreferences = getSharedPreferences("appearance", MODE_PRIVATE)
+        val initialAppearance = AppearanceSettings.read(appearancePreferences)
         setContent {
-            RedMagicTheme {
-                MainAppScreen(preferences)
+            var appearance by remember { mutableStateOf(initialAppearance) }
+            SideEffect {
+                splashContentReady = true
+            }
+            val systemDensity = LocalDensity.current
+            val scaledDensity = remember(systemDensity.density, systemDensity.fontScale, appearance.pageScale) {
+                Density(systemDensity.density * appearance.pageScale, systemDensity.fontScale)
+            }
+            val updateAppearance: (AppearanceSettings) -> Unit = { updated ->
+                appearance = updated.copy(pageScale = updated.pageScale.coerceIn(0.8f, 1.2f))
+                appearancePreferences.edit()
+                    .putString("color_style", appearance.colorStyle)
+                    .putString("color_spec", appearance.colorSpec)
+                    .putBoolean("predictive_back_enabled", appearance.predictiveBackEnabled)
+                    .putBoolean("horizontal_back_enabled", appearance.horizontalBackEnabled)
+                    .putFloat("page_scale", appearance.pageScale)
+                    .apply()
+            }
+            CompositionLocalProvider(LocalDensity provides scaledDensity) {
+                RedMagicTheme(appearance) {
+                    MainAppScreen(featurePreferences, appearance, updateAppearance)
+                }
             }
         }
     }
@@ -235,33 +306,157 @@ val PurpleColorScheme = lightColorScheme(
 )
 
 @Composable
-fun RedMagicTheme(content: @Composable () -> Unit) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+private fun RedMagicTheme(
+    appearance: AppearanceSettings,
+    content: @Composable () -> Unit
+) {
+    val context = LocalContext.current
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
-    val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    val seedColor = remember(context) {
         try {
-            if (isDark) androidx.compose.material3.dynamicDarkColorScheme(context)
-            else androidx.compose.material3.dynamicLightColorScheme(context)
-        } catch (t: Throwable) {
-            PurpleColorScheme
+            androidx.compose.material3.dynamicLightColorScheme(context).primary
+        } catch (_: Throwable) {
+            Color(0xFF6750A4)
         }
-    } else {
-        PurpleColorScheme
+    }
+    val colorScheme = remember(seedColor, isDark, appearance.colorStyle, appearance.colorSpec) {
+        runCatching {
+            makeDynamicColorScheme(seedColor, isDark, appearance.colorStyle, appearance.colorSpec)
+        }.getOrDefault(PurpleColorScheme)
+    }
+    LaunchedEffect(isDark) {
+        val window = (context as? ComponentActivity)?.window ?: return@LaunchedEffect
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !isDark
+            isAppearanceLightNavigationBars = !isDark
+        }
     }
     MaterialExpressiveTheme(
         colorScheme = colorScheme,
+        motionScheme = MotionScheme.expressive(),
         typography = Typography(),
         content = content
     )
 }
 
+private fun makeDynamicColorScheme(
+    seedColor: Color,
+    isDark: Boolean,
+    styleName: String,
+    specName: String
+): ColorScheme {
+    val style = styleName.takeIf { it in colorStyleOptions } ?: "TonalSpot"
+    val requestedSpec = runCatching { ColorSpec.SpecVersion.valueOf(specName) }
+        .getOrDefault(ColorSpec.SpecVersion.SPEC_2025)
+    val spec = if (requestedSpec == ColorSpec.SpecVersion.SPEC_2025 &&
+        style !in setOf("TonalSpot", "Neutral", "Vibrant", "Expressive")
+    ) {
+        ColorSpec.SpecVersion.SPEC_2021
+    } else {
+        requestedSpec
+    }
+    val sourceColor = Hct.fromInt(seedColor.toArgb())
+    val dynamicScheme = when (style) {
+        "Neutral" -> SchemeNeutral(sourceColor, isDark, 0.0, spec)
+        "Vibrant" -> SchemeVibrant(sourceColor, isDark, 0.0, spec)
+        "Expressive" -> SchemeExpressive(sourceColor, isDark, 0.0, spec)
+        "Rainbow" -> SchemeRainbow(sourceColor, isDark, 0.0, spec)
+        "FruitSalad" -> SchemeFruitSalad(sourceColor, isDark, 0.0, spec)
+        "Monochrome" -> SchemeMonochrome(sourceColor, isDark, 0.0, spec)
+        "Fidelity" -> SchemeFidelity(sourceColor, isDark, 0.0, spec)
+        "Content" -> SchemeContent(sourceColor, isDark, 0.0, spec)
+        else -> SchemeTonalSpot(sourceColor, isDark, 0.0, spec)
+    }
+    return dynamicScheme.toMaterialColorScheme()
+}
+
+private fun DynamicScheme.toMaterialColorScheme(): ColorScheme {
+    val base = if (isDark) darkColorScheme() else lightColorScheme()
+    return base.copy(
+        primary = Color(primary),
+        onPrimary = Color(onPrimary),
+        primaryContainer = Color(primaryContainer),
+        onPrimaryContainer = Color(onPrimaryContainer),
+        inversePrimary = Color(inversePrimary),
+        secondary = Color(secondary),
+        onSecondary = Color(onSecondary),
+        secondaryContainer = Color(secondaryContainer),
+        onSecondaryContainer = Color(onSecondaryContainer),
+        tertiary = Color(tertiary),
+        onTertiary = Color(onTertiary),
+        tertiaryContainer = Color(tertiaryContainer),
+        onTertiaryContainer = Color(onTertiaryContainer),
+        background = Color(background),
+        onBackground = Color(onBackground),
+        surface = Color(surface),
+        onSurface = Color(onSurface),
+        surfaceVariant = Color(surfaceVariant),
+        onSurfaceVariant = Color(onSurfaceVariant),
+        surfaceTint = Color(surfaceTint),
+        inverseSurface = Color(inverseSurface),
+        inverseOnSurface = Color(inverseOnSurface),
+        error = Color(error),
+        onError = Color(onError),
+        errorContainer = Color(errorContainer),
+        onErrorContainer = Color(onErrorContainer),
+        outline = Color(outline),
+        outlineVariant = Color(outlineVariant),
+        scrim = Color(scrim),
+        surfaceBright = Color(surfaceBright),
+        surfaceDim = Color(surfaceDim),
+        surfaceContainer = Color(surfaceContainer),
+        surfaceContainerHigh = Color(surfaceContainerHigh),
+        surfaceContainerHighest = Color(surfaceContainerHighest),
+        surfaceContainerLow = Color(surfaceContainerLow),
+        surfaceContainerLowest = Color(surfaceContainerLowest),
+        primaryFixed = Color(primaryFixed),
+        primaryFixedDim = Color(primaryFixedDim),
+        onPrimaryFixed = Color(onPrimaryFixed),
+        onPrimaryFixedVariant = Color(onPrimaryFixedVariant),
+        secondaryFixed = Color(secondaryFixed),
+        secondaryFixedDim = Color(secondaryFixedDim),
+        onSecondaryFixed = Color(onSecondaryFixed),
+        onSecondaryFixedVariant = Color(onSecondaryFixedVariant),
+        tertiaryFixed = Color(tertiaryFixed),
+        tertiaryFixedDim = Color(tertiaryFixedDim),
+        onTertiaryFixed = Color(onTertiaryFixed),
+        onTertiaryFixedVariant = Color(onTertiaryFixedVariant)
+    )
+}
+
 /**
- * Navigation tabs specification: "首页"(home), "日志"(logs), "关于"(about).
+ * Navigation tabs specification: "首页"(home), "关于"(about).
  */
 enum class MainNavTab(val title: String, val iconRes: Int) {
     HOME("首页", R.drawable.ic_home),
-    LOGS("日志", R.drawable.ic_logs),
-    ABOUT("关于", R.drawable.ic_about)
+    SETTINGS("设置", R.drawable.ic_about)
+}
+
+@Serializable
+private sealed interface MainDestination : NavKey {
+    @Serializable
+    @SerialName("root")
+    data object Root : MainDestination
+
+    @Serializable
+    @SerialName("home")
+    data object Home : MainDestination
+
+    @Serializable
+    @SerialName("settings")
+    data object Settings : MainDestination
+
+    @Serializable
+    @SerialName("category")
+    data class Category(val name: String) : MainDestination
+
+    @Serializable
+    @SerialName("about_device")
+    data object AboutDevice : MainDestination
+
+    @Serializable
+    @SerialName("sub_screen")
+    data class SubScreen(val key: String) : MainDestination
 }
 
 /**
@@ -310,13 +505,30 @@ fun ReferenceTopAppBar(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun MainAppScreen(preferences: SharedPreferences) {
+private fun MainAppScreen(
+    preferences: SharedPreferences,
+    appearance: AppearanceSettings,
+    onAppearanceChanged: (AppearanceSettings) -> Unit
+) {
     val colors = MaterialTheme.colorScheme
     val scope = rememberCoroutineScope()
+    val backStack = rememberNavBackStack<MainDestination>(MainDestination.Root)
+    var selectedTab by rememberSaveable { mutableStateOf(MainNavTab.HOME) }
+    // The navigation host keeps both the outgoing and incoming entry composed during a
+    // transition. Keep tab UI state at the host level so those two entry instances never
+    // claim the same SaveableStateHolder key at once.
+    val homeListState = rememberLazyListState()
+    val settingsListState = rememberLazyListState()
+    var homeSearchQuery by rememberSaveable { mutableStateOf("") }
+    val disabledBackDispatcherOwner = remember {
+        object : NavigationEventDispatcherOwner {
+            override val navigationEventDispatcher = NavigationEventDispatcher()
+        }
+    }
+    val currentDestination = backStack.lastOrNull() as? MainDestination ?: MainDestination.Root
+    val application = androidx.compose.ui.platform.LocalContext.current.applicationContext
+            as? HelperApplication
 
-    // Default selected tab is HOME
-    var selectedTab by remember { mutableStateOf(MainNavTab.HOME) }
-    var selectedCategoryName by remember { mutableStateOf<String?>(null) }
     var preferenceRevision by remember { mutableIntStateOf(0) }
     var toastVisible by remember { mutableStateOf(false) }
     var toastMessage by remember { mutableStateOf("已保存") }
@@ -325,16 +537,23 @@ private fun MainAppScreen(preferences: SharedPreferences) {
     val modifiedKeys = remember { mutableSetOf<String>() }
     val originalValues = remember { mutableMapOf<String, Any?>() }
 
-    val selectedCategory = selectedCategoryName?.let { name ->
+    val selectedCategory = (currentDestination as? MainDestination.Category)?.name?.let { name ->
         SettingCategory.values().firstOrNull { it.name == name }
     }
-
-    var currentSubScreenKey by remember { mutableStateOf<String?>(null) }
-    var onRefreshLogsAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var onExportLogsAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var onDeleteLogsAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var showDeleteLogsDialog by remember { mutableStateOf(false) }
-
+    val currentSubScreenKey = (currentDestination as? MainDestination.SubScreen)?.key
+    val canNavigateBack = backStack.size > 1
+    val navigateBack: () -> Unit = {
+        if (backStack.size > 1) {
+            backStack.removeAt(backStack.lastIndex)
+        } else if (selectedTab != MainNavTab.HOME) {
+            selectedTab = MainNavTab.HOME
+        }
+    }
+    val swipeBackDirection = when {
+        !appearance.horizontalBackEnabled -> NavSwipeDirection.None
+        LocalLayoutDirection.current == androidx.compose.ui.unit.LayoutDirection.Rtl -> NavSwipeDirection.RightToLeft
+        else -> NavSwipeDirection.LeftToRight
+    }
     val triggerToast: (String) -> Unit = { msg ->
         toastMessage = msg
         toastVisible = true
@@ -357,7 +576,6 @@ private fun MainAppScreen(preferences: SharedPreferences) {
         }
         hasChanges = modifiedKeys.isNotEmpty()
         preferenceRevision += 1
-        AppLogger.log("INFO", "设置管理", "设置项已更新: key=$key (累计修改项: ${modifiedKeys.size})")
         triggerToast("已保存")
     }
 
@@ -371,12 +589,11 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                 null -> editor.remove(key)
             }
         }
-        editor.commit()
+        editor.apply()
         originalValues.clear()
         modifiedKeys.clear()
         hasChanges = false
         preferenceRevision += 1
-        AppLogger.log("INFO", "设置管理", "已撤销设置项更改")
         triggerToast("已撤销更改")
     }
 
@@ -395,6 +612,7 @@ private fun MainAppScreen(preferences: SharedPreferences) {
         originalValues.clear()
         modifiedKeys.clear()
         scope.launch(Dispatchers.IO) {
+            application?.awaitPendingConfigSync()
             val success = restartPackages(packagesToRestart)
             withContext(Dispatchers.Main) {
                 isLoading = false
@@ -408,13 +626,10 @@ private fun MainAppScreen(preferences: SharedPreferences) {
         }
     }
 
-    BackHandler(enabled = currentSubScreenKey != null) {
-        currentSubScreenKey = null
-    }
-
-    BackHandler(enabled = currentSubScreenKey == null && selectedCategory != null) {
-        selectedCategoryName = null
-    }
+    BackHandler(
+        enabled = (canNavigateBack || selectedTab != MainNavTab.HOME) && !appearance.predictiveBackEnabled,
+        onBack = navigateBack
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
         Scaffold(
@@ -423,18 +638,14 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                 TopAppBar(
                     navigationIcon = {
                         AnimatedVisibility(
-                            visible = currentSubScreenKey != null || selectedCategory != null,
-                            enter = fadeIn(tween(200)) + expandHorizontally(tween(200)),
-                            exit = fadeOut(tween(200)) + shrinkHorizontally(tween(200))
+                            visible = canNavigateBack,
+                            enter = fadeIn(spring(stiffness = Spring.StiffnessMedium))
+                                    + expandHorizontally(spring(stiffness = Spring.StiffnessMedium)),
+                            exit = fadeOut(spring(stiffness = Spring.StiffnessMedium))
+                                    + shrinkHorizontally(spring(stiffness = Spring.StiffnessMedium))
                         ) {
                             IconButton(
-                                onClick = {
-                                    if (currentSubScreenKey != null) {
-                                        currentSubScreenKey = null
-                                    } else {
-                                        selectedCategoryName = null
-                                    }
-                                },
+                                onClick = navigateBack,
                                 modifier = Modifier.size(48.dp)
                             ) {
                                 Icon(
@@ -449,20 +660,17 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                     title = {
                         val headerTitle = when {
                             currentSubScreenKey == "lockscreen_custom_font_settings" -> "锁屏时钟自定义字体"
+                            currentDestination == MainDestination.AboutDevice -> "关于设备"
                             selectedCategory != null -> selectedCategory.title
+                            selectedTab == MainNavTab.SETTINGS -> "设置"
                             else -> "红魔助手"
                         }
                         AnimatedContent(
                             targetState = headerTitle,
                             contentAlignment = Alignment.CenterStart,
                             transitionSpec = {
-                                if (targetState == "红魔助手") {
-                                    (slideInHorizontally(tween(250)) { -it / 3 } + fadeIn(tween(250)))
-                                        .togetherWith(slideOutHorizontally(tween(250)) { it / 3 } + fadeOut(tween(250)))
-                                } else {
-                                    (slideInHorizontally(tween(250)) { it / 3 } + fadeIn(tween(250)))
-                                        .togetherWith(slideOutHorizontally(tween(250)) { -it / 3 } + fadeOut(tween(250)))
-                                }
+                                fadeIn(animationSpec = androidx.compose.animation.core.tween(150))
+                                    .togetherWith(fadeOut(animationSpec = androidx.compose.animation.core.tween(150)))
                             },
                             label = "topbar-title"
                         ) { currentTitle ->
@@ -477,47 +685,6 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                         }
                     },
                     actions = {
-                        if (selectedTab == MainNavTab.LOGS && selectedCategory == null && currentSubScreenKey == null) {
-                            TextButton(
-                                onClick = { onRefreshLogsAction?.invoke() },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_restart_alt),
-                                    contentDescription = "刷新",
-                                    modifier = Modifier.size(18.dp),
-                                    tint = colors.primary
-                                )
-                                Spacer(Modifier.width(2.dp))
-                                Text("刷新", color = colors.primary, style = MaterialTheme.typography.labelMedium)
-                            }
-                            TextButton(
-                                onClick = { onExportLogsAction?.invoke() },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_share),
-                                    contentDescription = "导出",
-                                    modifier = Modifier.size(18.dp),
-                                    tint = colors.primary
-                                )
-                                Spacer(Modifier.width(2.dp))
-                                Text("导出", color = colors.primary, style = MaterialTheme.typography.labelMedium)
-                            }
-                            TextButton(
-                                onClick = { showDeleteLogsDialog = true },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_delete),
-                                    contentDescription = "删除",
-                                    modifier = Modifier.size(18.dp),
-                                    tint = colors.error
-                                )
-                                Spacer(Modifier.width(2.dp))
-                                Text("删除", color = colors.error, style = MaterialTheme.typography.labelMedium)
-                            }
-                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = colors.surface,
@@ -527,11 +694,7 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                 )
             },
             bottomBar = {
-                AnimatedVisibility(
-                    visible = selectedCategory == null && currentSubScreenKey == null,
-                    enter = slideInVertically(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)) { it },
-                    exit = slideOutVertically(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)) { it }
-                ) {
+                if (!canNavigateBack) {
                     NavigationBar(
                         modifier = Modifier.height(80.dp),
                         containerColor = colors.surfaceContainer,
@@ -543,19 +706,22 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                                 selected = selected,
                                 onClick = {
                                     if (selectedTab != tab) {
-                                        isLoading = true
                                         selectedTab = tab
-                                        scope.launch {
-                                            delay(150)
-                                            isLoading = false
-                                        }
                                     }
                                 },
                                 icon = {
+                                    val iconScale by animateFloatAsState(
+                                        targetValue = if (selected) 1.08f else 1f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioNoBouncy,
+                                            stiffness = Spring.StiffnessMedium
+                                        ),
+                                        label = "nav-icon-scale"
+                                    )
                                     Icon(
                                         painter = painterResource(tab.iconRes),
                                         contentDescription = tab.title,
-                                        modifier = Modifier.size(24.dp)
+                                        modifier = Modifier.size(24.dp).scale(iconScale)
                                     )
                                 },
                                 label = {
@@ -582,69 +748,137 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                     .fillMaxSize()
                     .padding(top = paddingValues.calculateTopPadding())
             ) {
-                // Screen Transitions
-                AnimatedContent(
-                    targetState = currentSubScreenKey ?: selectedCategory?.name,
-                    transitionSpec = {
-                        val motion = tween<androidx.compose.ui.unit.IntOffset>(300)
-                        if (targetState == null) {
-                            (slideInHorizontally(animationSpec = motion) { -it / 4 } +
-                                    fadeIn(animationSpec = tween(300))) togetherWith
-                                    (slideOutHorizontally(animationSpec = motion) { it } +
-                                            fadeOut(animationSpec = tween(300)))
-                        } else {
-                            (slideInHorizontally(animationSpec = motion) { it / 4 } +
-                                    fadeIn(animationSpec = tween(300))) togetherWith
-                                    (slideOutHorizontally(animationSpec = motion) { -it } +
-                                            fadeOut(animationSpec = tween(300)))
+                val showPredictiveBack = appearance.predictiveBackEnabled
+                val navigationContent: @Composable () -> Unit = {
+                    NavDisplay(
+                        backStack = backStack,
+                        modifier = Modifier.fillMaxSize(),
+                        onBack = navigateBack,
+                        transition = NavTransitions.MiuixDefault,
+                        effects = NavDisplayEffects.None
+                    ) {
+                        entry<MainDestination.Root> {
+                            AnimatedContent(
+                                targetState = selectedTab,
+                                transitionSpec = {
+                                    if (targetState == MainNavTab.SETTINGS) {
+                                        (slideInHorizontally(
+                                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                            initialOffsetX = { fullWidth -> (fullWidth * 0.12f).toInt() }
+                                        ) + fadeIn(
+                                            animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                                        )).togetherWith(
+                                            slideOutHorizontally(
+                                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                                targetOffsetX = { fullWidth -> -(fullWidth * 0.12f).toInt() }
+                                            ) + fadeOut(
+                                                animationSpec = tween(140, easing = FastOutLinearInEasing)
+                                            )
+                                        )
+                                    } else {
+                                        (slideInHorizontally(
+                                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                            initialOffsetX = { fullWidth -> -(fullWidth * 0.12f).toInt() }
+                                        ) + fadeIn(
+                                            animationSpec = tween(180, easing = LinearOutSlowInEasing)
+                                        )).togetherWith(
+                                            slideOutHorizontally(
+                                                animationSpec = spring(stiffness = Spring.StiffnessMediumLow),
+                                                targetOffsetX = { fullWidth -> (fullWidth * 0.12f).toInt() }
+                                            ) + fadeOut(
+                                                animationSpec = tween(140, easing = FastOutLinearInEasing)
+                                            )
+                                        )
+                                    }.using(SizeTransform(clip = false))
+                                },
+                                label = "root-tab-transition"
+                            ) { tab ->
+                                when (tab) {
+                                    MainNavTab.HOME -> HomeScreen(
+                                        preferences = preferences,
+                                        searchQuery = homeSearchQuery,
+                                        onSearchQueryChange = { homeSearchQuery = it },
+                                        listState = homeListState,
+                                        onCategoryClick = { category ->
+                                            val destination = MainDestination.Category(category.name)
+                                            if (destination !in backStack) backStack.add(destination)
+                                        }
+                                    )
+                                    MainNavTab.SETTINGS -> SettingsScreen(
+                                        appearance = appearance,
+                                        listState = settingsListState,
+                                        onAppearanceChanged = onAppearanceChanged,
+                                        onOpenAboutDevice = {
+                                            if (MainDestination.AboutDevice !in backStack) {
+                                                backStack.add(MainDestination.AboutDevice)
+                                            }
+                                        }
+                                    )
+                                }
+                            }
                         }
-                    },
-                    label = "category-navigation"
-                ) { screenKey ->
-                    if (screenKey == "lockscreen_custom_font_settings") {
-                        LockScreenFontSettingsScreen(
-                            preferences = preferences,
-                            revision = preferenceRevision,
-                            onPreferenceChanged = handlePreferenceChanged,
-                            onTriggerToast = triggerToast
-                        )
-                    } else if (selectedCategory != null) {
-                        CategoryDetailView(
-                            preferences = preferences,
-                            category = selectedCategory,
-                            revision = preferenceRevision,
-                            onPreferenceChanged = handlePreferenceChanged,
-                            onActionClick = { actionKey ->
-                                currentSubScreenKey = actionKey
-                            }
-                        )
-                    } else {
-                        when (selectedTab) {
-                            MainNavTab.HOME -> {
-                                HomeScreen(
+                        entry<MainDestination.Home> {
+                            HomeScreen(
+                                preferences = preferences,
+                                searchQuery = homeSearchQuery,
+                                onSearchQueryChange = { homeSearchQuery = it },
+                                listState = homeListState,
+                                onCategoryClick = { category ->
+                                    val destination = MainDestination.Category(category.name)
+                                    if (destination !in backStack) backStack.add(destination)
+                                }
+                            )
+                        }
+                        entry<MainDestination.Settings> {
+                            SettingsScreen(
+                                appearance = appearance,
+                                listState = settingsListState,
+                                onAppearanceChanged = onAppearanceChanged,
+                                onOpenAboutDevice = {
+                                    if (MainDestination.AboutDevice !in backStack) {
+                                        backStack.add(MainDestination.AboutDevice)
+                                    }
+                                }
+                            )
+                        }
+                        entry<MainDestination.Category>(swipeDismiss = swipeBackDirection) { destination ->
+                            val category = SettingCategory.values()
+                                .firstOrNull { it.name == destination.name }
+                            if (category != null) {
+                                CategoryDetailView(
                                     preferences = preferences,
+                                    category = category,
                                     revision = preferenceRevision,
-                                    onCategoryClick = { selectedCategoryName = it.name }
-                                )
-                            }
-                            MainNavTab.LOGS -> {
-                                LogsScreen(
-                                    preferences = preferences,
-                                    onTriggerToast = triggerToast,
-                                    onRegisterActions = { refresh, export, delete ->
-                                        onRefreshLogsAction = refresh
-                                        onExportLogsAction = export
-                                        onDeleteLogsAction = delete
+                                    onPreferenceChanged = handlePreferenceChanged,
+                                    onActionClick = { actionKey ->
+                                        val next = MainDestination.SubScreen(actionKey)
+                                        if (next !in backStack) backStack.add(next)
                                     }
                                 )
                             }
-                            MainNavTab.ABOUT -> {
-                                AboutScreen(
+                        }
+                        entry<MainDestination.AboutDevice>(swipeDismiss = swipeBackDirection) {
+                            AboutDeviceScreen()
+                        }
+                        entry<MainDestination.SubScreen>(swipeDismiss = swipeBackDirection) { destination ->
+                            if (destination.key == "lockscreen_custom_font_settings") {
+                                LockScreenFontSettingsScreen(
                                     preferences = preferences,
+                                    revision = preferenceRevision,
+                                    onPreferenceChanged = handlePreferenceChanged,
                                     onTriggerToast = triggerToast
                                 )
                             }
                         }
+                    }
+                }
+                if (showPredictiveBack) {
+                    navigationContent()
+                } else {
+                    CompositionLocalProvider(
+                        LocalNavigationEventDispatcherOwner provides disabledBackDispatcherOwner
+                    ) {
+                        navigationContent()
                     }
                 }
 
@@ -652,13 +886,13 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                 AnimatedVisibility(
                     visible = toastVisible,
                     enter = slideInVertically(
-                        initialOffsetY = { it },
-                        animationSpec = tween(300)
-                    ) + fadeIn(animationSpec = tween(300)),
+                        initialOffsetY = { it / 3 },
+                        animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                    ) + fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMedium)),
                     exit = slideOutVertically(
-                        targetOffsetY = { it },
-                        animationSpec = tween(300)
-                    ) + fadeOut(animationSpec = tween(300)),
+                        targetOffsetY = { it / 3 },
+                        animationSpec = spring(stiffness = Spring.StiffnessMedium)
+                    ) + fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMedium)),
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .padding(bottom = if (selectedCategory == null) 96.dp else 24.dp)
@@ -691,8 +925,10 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                 // 规范：重启的图标 只有在改动的时候 显示出来，右侧下拉支持“重启”与“撤销”
                 AnimatedVisibility(
                     visible = hasChanges,
-                    enter = fadeIn(tween(200)) + slideInVertically(tween(200)) { it / 2 },
-                    exit = fadeOut(tween(200)) + slideOutVertically(tween(200)) { it / 2 },
+                    enter = fadeIn(spring(stiffness = Spring.StiffnessMedium)) +
+                            slideInVertically(spring(stiffness = Spring.StiffnessMedium)) { it / 3 },
+                    exit = fadeOut(spring(stiffness = Spring.StiffnessMedium)) +
+                            slideOutVertically(spring(stiffness = Spring.StiffnessMedium)) { it / 3 },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(
@@ -712,31 +948,7 @@ private fun MainAppScreen(preferences: SharedPreferences) {
             }
         }
 
-        if (showDeleteLogsDialog) {
-            AlertDialog(
-                onDismissRequest = { showDeleteLogsDialog = false },
-                title = { Text("清空运行与适配日志") },
-                text = { Text("确定要删除所有运行日志与跨进程 Hook 记录吗？清空后不可恢复。") },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            showDeleteLogsDialog = false
-                            onDeleteLogsAction?.invoke()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.error)
-                    ) {
-                        Text("清空")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showDeleteLogsDialog = false }) {
-                        Text("取消")
-                    }
-                }
-            )
-        }
-
-        // Full-screen loading scrim covering topBar ("红魔助手") and bottomBar ("首页", "日志", "关于")
+        // Full-screen loading scrim covering the top and bottom navigation bars.
         if (isLoading) {
             Box(
                 modifier = Modifier
@@ -750,18 +962,15 @@ private fun MainAppScreen(preferences: SharedPreferences) {
                 contentAlignment = Alignment.Center
             ) {
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = colors.surfaceContainerHigh,
-                    shadowElevation = 6.dp,
+                    shape = RoundedCornerShape(28.dp),
+                    color = colors.primaryContainer,
+                    tonalElevation = 3.dp,
                     modifier = Modifier.size(80.dp)
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(
+                        LoadingIndicator(
                             modifier = Modifier.size(40.dp),
-                            strokeWidth = 4.dp,
-                            strokeCap = StrokeCap.Round,
-                            color = colors.primary,
-                            trackColor = colors.surfaceContainerHighest
+                            color = colors.onPrimaryContainer
                         )
                     }
                 }
@@ -776,12 +985,12 @@ private fun MainAppScreen(preferences: SharedPreferences) {
 @Composable
 private fun HomeScreen(
     preferences: SharedPreferences,
-    revision: Int,
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    listState: LazyListState,
     onCategoryClick: (SettingCategory) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    var searchQuery by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
 
     val categories = remember { SettingCategory.values().toList() }
     val filteredCategories = remember(searchQuery) {
@@ -810,7 +1019,7 @@ private fun HomeScreen(
             // Search bar
             OutlinedTextField(
                 value = searchQuery,
-                onValueChange = { searchQuery = it },
+                onValueChange = onSearchQueryChange,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -831,7 +1040,7 @@ private fun HomeScreen(
                 },
                 trailingIcon = {
                     if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
+                        IconButton(onClick = { onSearchQueryChange("") }) {
                             Icon(
                                 painter = painterResource(R.drawable.ic_close),
                                 contentDescription = "清除",
@@ -855,14 +1064,16 @@ private fun HomeScreen(
             LazyColumn(
                 state = listState,
                 modifier = Modifier
-                    .fillMaxSize()
+                    .weight(1f)
+                    .fillMaxWidth()
                     .padding(horizontal = 16.dp),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 96.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
                 verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
                 itemsIndexed(
                     items = filteredCategories,
-                    key = { _, cat -> cat.name }
+                    key = { _, cat -> cat.name },
+                    contentType = { _, _ -> "category_item" }
                 ) { index, category ->
                     val shape = getExpressiveItemShape(index, filteredCategories.size)
                     ExpressiveCategoryItem(
@@ -948,53 +1159,55 @@ private fun ExpressiveRestartSplitButton(
                     )
                 }
 
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false },
-                    modifier = Modifier.background(colors.surfaceContainerHigh)
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = "重启",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.onSurface
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_restart_alt),
-                                contentDescription = null,
-                                tint = colors.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onRestart()
-                        }
-                    )
-                    DropdownMenuItem(
-                        text = {
-                            Text(
-                                text = "撤销",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.onSurface
-                            )
-                        },
-                        leadingIcon = {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_close),
-                                contentDescription = null,
-                                tint = colors.error,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        },
-                        onClick = {
-                            menuExpanded = false
-                            onCancel()
-                        }
-                    )
+                if (menuExpanded) {
+                    DropdownMenu(
+                        expanded = true,
+                        onDismissRequest = { menuExpanded = false },
+                        modifier = Modifier.background(colors.surfaceContainerHigh)
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "重启",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.onSurface
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_restart_alt),
+                                    contentDescription = null,
+                                    tint = colors.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onRestart()
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "撤销",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.onSurface
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_close),
+                                    contentDescription = null,
+                                    tint = colors.error,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onCancel()
+                            }
+                        )
+                    }
                 }
             }
         }
@@ -1025,23 +1238,19 @@ fun getExpressiveItemShape(index: Int, count: Int): RoundedCornerShape {
 private fun ExpressiveCategoryItem(
     category: SettingCategory,
     shape: RoundedCornerShape,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val count = categorySettings[category].orEmpty().size
-    val interactionSource = remember { MutableInteractionSource() }
-    val isPressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (isPressed) 0.98f else 1f, animationSpec = tween(150), label = "item-scale")
+    val count = remember(category) { categorySettings[category].orEmpty().size }
 
     Surface(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(72.dp)
-            .scale(scale)
-            .clip(shape)
             .clickable(
-                interactionSource = interactionSource,
                 indication = ripple(color = colors.primary.copy(alpha = 0.12f)),
+                interactionSource = null,
                 onClick = onClick
             ),
         shape = shape,
@@ -1055,22 +1264,18 @@ private fun ExpressiveCategoryItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // 40dp circle with primaryContainer background, 24dp icon inside
-            Surface(
-                modifier = Modifier.size(40.dp),
-                shape = CircleShape,
-                color = colors.primaryContainer
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(colors.primaryContainer, CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(category.iconRes),
-                        contentDescription = null,
-                        modifier = Modifier.size(24.dp),
-                        tint = Color.Unspecified
-                    )
-                }
+                Icon(
+                    painter = painterResource(category.iconRes),
+                    contentDescription = null,
+                    modifier = Modifier.size(24.dp),
+                    tint = Color.Unspecified
+                )
             }
 
             Spacer(Modifier.width(14.dp))
@@ -1131,8 +1336,10 @@ private fun CategoryDetailView(
     onActionClick: (String) -> Unit = {}
 ) {
     val colors = MaterialTheme.colorScheme
-    val settingsList = categorySettings[category].orEmpty().filter { setting ->
-        setting.dependencyKey == null || readBoolean(preferences, setting.dependencyKey!!, false)
+    val settingsList = remember(category, revision) {
+        categorySettings[category].orEmpty().filter { setting ->
+            setting.dependencyKey == null || readBoolean(preferences, setting.dependencyKey!!, false)
+        }
     }
 
     Column(
@@ -1186,14 +1393,16 @@ private fun CategoryDetailView(
 
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .padding(horizontal = 16.dp),
             contentPadding = PaddingValues(top = 6.dp, bottom = 88.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
             verticalArrangement = Arrangement.spacedBy(3.dp)
         ) {
             itemsIndexed(
                 items = settingsList,
-                key = { _, item -> item.id }
+                key = { _, item -> item.id },
+                contentType = { _, item -> item::class.java.simpleName }
             ) { index, item ->
                 val shape = getExpressiveItemShape(index, settingsList.size)
                 when (item) {
@@ -1201,28 +1410,24 @@ private fun CategoryDetailView(
                         preferences = preferences,
                         setting = item,
                         shape = shape,
-                        revision = revision,
                         onPreferenceChanged = onPreferenceChanged
                     )
                     is SettingItem.Number -> ExpressiveNumberItem(
                         preferences = preferences,
                         setting = item,
                         shape = shape,
-                        revision = revision,
                         onPreferenceChanged = onPreferenceChanged
                     )
                     is SettingItem.Text -> ExpressiveTextItem(
                         preferences = preferences,
                         setting = item,
                         shape = shape,
-                        revision = revision,
                         onPreferenceChanged = onPreferenceChanged
                     )
                     is SettingItem.Slider -> ExpressiveSliderItem(
                         preferences = preferences,
                         setting = item,
                         shape = shape,
-                        revision = revision,
                         onPreferenceChanged = onPreferenceChanged
                     )
                     is SettingItem.Action -> ExpressiveActionItem(
@@ -1246,7 +1451,6 @@ private fun ExpressiveActionItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
             .clickable(onClick = onClick),
         shape = shape,
         color = colors.surfaceContainerLow
@@ -1289,18 +1493,17 @@ private fun ExpressiveToggleItem(
     preferences: SharedPreferences,
     setting: SettingItem.Toggle,
     shape: RoundedCornerShape,
-    revision: Int,
     onPreferenceChanged: (String, Any?, Any?) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    var checked by remember(setting.key, revision) {
+    var checked by remember(setting.key) {
         mutableStateOf(readBoolean(preferences, setting.key, setting.defaultValue))
     }
     val update: (Boolean) -> Unit = { value ->
         if (checked != value) {
             val oldValue = checked
             checked = value
-            preferences.edit().putBoolean(setting.key, value).commit()
+            preferences.edit().putBoolean(setting.key, value).apply()
             onPreferenceChanged(setting.key, oldValue, value)
         }
     }
@@ -1308,7 +1511,6 @@ private fun ExpressiveToggleItem(
     Surface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(shape)
             .clickable { update(!checked) },
         shape = shape,
         color = colors.surfaceContainerLow
@@ -1353,12 +1555,11 @@ private fun ExpressiveNumberItem(
     preferences: SharedPreferences,
     setting: SettingItem.Number,
     shape: RoundedCornerShape,
-    revision: Int,
     onPreferenceChanged: (String, Any?, Any?) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    var isEdited by remember(setting.key, revision) { mutableStateOf(false) }
-    var textValue by remember(setting.key, revision) {
+    var isEdited by remember(setting.key) { mutableStateOf(false) }
+    var textValue by remember(setting.key) {
         mutableStateOf(readNumber(preferences, setting.key, setting.defaultValue).toString())
     }
     var hasHadFocus by remember { mutableStateOf(false) }
@@ -1371,7 +1572,7 @@ private fun ExpressiveNumberItem(
             if (parsed != current) {
                 val oldValue = current
                 textValue = parsed.toString()
-                preferences.edit().putInt(setting.key, parsed).commit()
+                preferences.edit().putInt(setting.key, parsed).apply()
                 onPreferenceChanged(setting.key, oldValue, parsed)
             }
         }
@@ -1379,8 +1580,7 @@ private fun ExpressiveNumberItem(
 
     Surface(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape),
+            .fillMaxWidth(),
         shape = shape,
         color = colors.surfaceContainerLow
     ) {
@@ -1431,12 +1631,11 @@ private fun ExpressiveTextItem(
     preferences: SharedPreferences,
     setting: SettingItem.Text,
     shape: RoundedCornerShape,
-    revision: Int,
     onPreferenceChanged: (String, Any?, Any?) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    var isEdited by remember(setting.key, revision) { mutableStateOf(false) }
-    var textValue by remember(setting.key, revision) {
+    var isEdited by remember(setting.key) { mutableStateOf(false) }
+    var textValue by remember(setting.key) {
         mutableStateOf(readText(preferences, setting.key, setting.defaultValue))
     }
     var hasHadFocus by remember { mutableStateOf(false) }
@@ -1449,7 +1648,7 @@ private fun ExpressiveTextItem(
             if (normalized != current) {
                 val oldValue = current
                 textValue = normalized
-                preferences.edit().putString(setting.key, normalized).commit()
+                preferences.edit().putString(setting.key, normalized).apply()
                 onPreferenceChanged(setting.key, oldValue, normalized)
             }
         }
@@ -1457,8 +1656,7 @@ private fun ExpressiveTextItem(
 
     Surface(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape),
+            .fillMaxWidth(),
         shape = shape,
         color = colors.surfaceContainerLow
     ) {
@@ -1509,21 +1707,19 @@ private fun ExpressiveSliderItem(
     preferences: SharedPreferences,
     setting: SettingItem.Slider,
     shape: RoundedCornerShape,
-    revision: Int,
     onPreferenceChanged: (String, Any?, Any?) -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val initialValue = remember(setting.key, revision) {
+    val initialValue = remember(setting.key) {
         readNumber(preferences, setting.key, setting.defaultValue).coerceIn(setting.minValue, setting.maxValue)
     }
-    var sliderPosition by remember(setting.key, revision) {
+    var sliderPosition by remember(setting.key) {
         mutableFloatStateOf(initialValue.toFloat())
     }
 
     Surface(
         modifier = Modifier
-            .fillMaxWidth()
-            .clip(shape),
+            .fillMaxWidth(),
         shape = shape,
         color = colors.surfaceContainerLow
     ) {
@@ -1581,7 +1777,7 @@ private fun ExpressiveSliderItem(
                     val finalInt = sliderPosition.toInt()
                     val oldValue = readNumber(preferences, setting.key, setting.defaultValue)
                     if (oldValue != finalInt) {
-                        preferences.edit().putInt(setting.key, finalInt).commit()
+                        preferences.edit().putInt(setting.key, finalInt).apply()
                         onPreferenceChanged(setting.key, oldValue, finalInt)
                     }
                 },
@@ -1727,7 +1923,7 @@ private fun LockScreenFontSettingsScreen(
                         preferences.edit()
                             .putString("lockscreen_custom_font_imported_name", fileName)
                             .putLong("lockscreen_custom_font_timestamp", System.currentTimeMillis())
-                            .commit()
+                            .apply()
                         onPreferenceChanged("lockscreen_custom_font_imported_name", oldVal, fileName)
                         onTriggerToast("已导入外部字体: $fileName")
                     }
@@ -1748,7 +1944,7 @@ private fun LockScreenFontSettingsScreen(
         preferences.edit()
             .remove("lockscreen_custom_font_imported_name")
             .remove("lockscreen_custom_font_timestamp")
-            .commit()
+            .apply()
         onPreferenceChanged("lockscreen_custom_font_imported_name", oldVal, "")
         onTriggerToast("已清除导入字体")
     }
@@ -1757,7 +1953,7 @@ private fun LockScreenFontSettingsScreen(
         val oldVal = systemFontPath
         val newVal = if (oldVal == path) "" else path
         systemFontPath = newVal
-        preferences.edit().putString("lockscreen_system_font_path", newVal).commit()
+        preferences.edit().putString("lockscreen_system_font_path", newVal).apply()
         onPreferenceChanged("lockscreen_system_font_path", oldVal, newVal)
         if (newVal.isNotEmpty()) {
             onTriggerToast("已选择系统字体: ${File(newVal).name}")
@@ -1807,7 +2003,7 @@ private fun LockScreenFontSettingsScreen(
                         val newVal = !masterEnabled
                         val oldVal = masterEnabled
                         masterEnabled = newVal
-                        preferences.edit().putBoolean("lockscreen_custom_font_switch", newVal).commit()
+                        preferences.edit().putBoolean("lockscreen_custom_font_switch", newVal).apply()
                         onPreferenceChanged("lockscreen_custom_font_switch", oldVal, newVal)
                     },
                 shape = RoundedCornerShape(20.dp),
@@ -1839,7 +2035,7 @@ private fun LockScreenFontSettingsScreen(
                         onCheckedChange = { newVal ->
                             val oldVal = masterEnabled
                             masterEnabled = newVal
-                            preferences.edit().putBoolean("lockscreen_custom_font_switch", newVal).commit()
+                            preferences.edit().putBoolean("lockscreen_custom_font_switch", newVal).apply()
                             onPreferenceChanged("lockscreen_custom_font_switch", oldVal, newVal)
                         },
                         colors = SwitchDefaults.colors(
@@ -1894,7 +2090,7 @@ private fun LockScreenFontSettingsScreen(
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            text = "锁屏 / AOD 时钟实时预览",
+                            text = "锁屏时钟实时预览",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFFCAC4D0)
                         )
@@ -2196,7 +2392,7 @@ private fun LockScreenFontSettingsScreen(
                             onValueChangeFinished = {
                                 val oldVal = readNumber(preferences, "lockscreen_custom_font_weight", 400)
                                 if (oldVal != fontWeight) {
-                                    preferences.edit().putInt("lockscreen_custom_font_weight", fontWeight).commit()
+                                    preferences.edit().putInt("lockscreen_custom_font_weight", fontWeight).apply()
                                     onPreferenceChanged("lockscreen_custom_font_weight", oldVal, fontWeight)
                                 }
                             },
@@ -2243,7 +2439,7 @@ private fun LockScreenFontSettingsScreen(
                             onValueChangeFinished = {
                                 val oldVal = readNumber(preferences, "lockscreen_custom_font_size", 70)
                                 if (oldVal != fontSize) {
-                                    preferences.edit().putInt("lockscreen_custom_font_size", fontSize).commit()
+                                    preferences.edit().putInt("lockscreen_custom_font_size", fontSize).apply()
                                     onPreferenceChanged("lockscreen_custom_font_size", oldVal, fontSize)
                                 }
                             },
@@ -2289,7 +2485,7 @@ private fun LockScreenFontSettingsScreen(
                             onValueChangeFinished = {
                                 val oldVal = readNumber(preferences, "lockscreen_custom_date_size", 24)
                                 if (oldVal != dateSize) {
-                                    preferences.edit().putInt("lockscreen_custom_date_size", dateSize).commit()
+                                    preferences.edit().putInt("lockscreen_custom_date_size", dateSize).apply()
                                     onPreferenceChanged("lockscreen_custom_date_size", oldVal, dateSize)
                                 }
                             },
@@ -2310,20 +2506,315 @@ private fun LockScreenFontSettingsScreen(
     }
 }
 
-/**
- * About Screen: Default landing screen containing module info, device info, root state, and restart tools.
- */
 @Composable
-private fun AboutScreen(
-    preferences: SharedPreferences,
-    onTriggerToast: (String) -> Unit
+private fun SettingsScreen(
+    appearance: AppearanceSettings,
+    listState: LazyListState,
+    onAppearanceChanged: (AppearanceSettings) -> Unit,
+    onOpenAboutDevice: () -> Unit
 ) {
     val colors = MaterialTheme.colorScheme
-    val scope = rememberCoroutineScope()
-    var rootState by remember { mutableStateOf<Boolean?>(null) }
+    LazyColumn(
+        state = listState,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(colors.surface)
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(
+            top = 8.dp,
+            bottom = 96.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        ),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(28.dp),
+                color = colors.surfaceContainerLow,
+                tonalElevation = 1.dp
+            ) {
+                Column {
+                    SettingsDropdownRow(
+                        title = "色彩风格",
+                        iconRes = R.drawable.ic_palette_settings,
+                        summary = "选择 Material You 配色方案",
+                        selected = appearance.colorStyle,
+                        options = colorStyleOptions,
+                        onSelected = { onAppearanceChanged(appearance.copy(colorStyle = it)) }
+                    )
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp))
+                    SettingsDropdownRow(
+                        title = "色彩标准",
+                        iconRes = R.drawable.ic_tune_settings,
+                        summary = "选择 Material 色彩算法版本",
+                        selected = appearance.colorSpec.toColorSpecLabel(),
+                        options = colorSpecOptions.map { it.toColorSpecLabel() },
+                        onSelected = { label ->
+                            val selectedSpec = if (label == "Spec_2021") "SPEC_2021" else "SPEC_2025"
+                            onAppearanceChanged(appearance.copy(colorSpec = selectedSpec))
+                        }
+                    )
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp))
+                    SettingsSwitchRow(
+                        title = "启用预测性返回手势",
+                        iconRes = R.drawable.ic_gesture_settings,
+                        summary = "显示 Android 返回手势的页面预览",
+                        checked = appearance.predictiveBackEnabled,
+                        onCheckedChange = {
+                            onAppearanceChanged(appearance.copy(predictiveBackEnabled = it))
+                        }
+                    )
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp))
+                    SettingsSwitchRow(
+                        title = "横移返回手势",
+                        iconRes = R.drawable.ic_arrow_back,
+                        summary = "从屏幕左侧向右滑动返回上一级",
+                        checked = appearance.horizontalBackEnabled,
+                        onCheckedChange = {
+                            onAppearanceChanged(appearance.copy(horizontalBackEnabled = it))
+                        }
+                    )
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp))
+                    PageScaleRow(
+                        iconRes = R.drawable.ic_zoom_in_settings,
+                        scale = appearance.pageScale,
+                        onScaleChanged = { onAppearanceChanged(appearance.copy(pageScale = it)) }
+                    )
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp))
+                    SettingsActionRow(
+                        title = "关于设备",
+                        iconRes = R.drawable.ic_about,
+                        summary = "查看 SELinux 状态、设备型号、系统指纹和版本",
+                        onClick = onOpenAboutDevice
+                    )
+                }
+            }
+        }
+    }
+}
 
+private fun String.toColorSpecLabel(): String = when (this) {
+    "SPEC_2021", "Spec_2021" -> "Spec_2021"
+    else -> "Spec_2025"
+}
+
+@Composable
+private fun SettingsDropdownRow(
+    title: String,
+    iconRes: Int,
+    summary: String,
+    selected: String,
+    options: List<String>,
+    onSelected: (String) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    var expanded by remember(title) { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { expanded = true }
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsLeadingIcon(iconRes)
+            Spacer(Modifier.width(16.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = colors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = colors.secondaryContainer.copy(alpha = 0.65f),
+                contentColor = colors.onSecondaryContainer,
+                modifier = Modifier.align(Alignment.CenterVertically)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = selected,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.primary,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+                    Icon(
+                        painter = painterResource(R.drawable.ic_arrow_drop_down),
+                        contentDescription = "选择$title",
+                        tint = colors.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+        if (expanded) {
+            DropdownMenu(
+                expanded = true,
+                onDismissRequest = { expanded = false },
+                modifier = Modifier.background(colors.surfaceContainerHigh)
+            ) {
+                options.forEach { option ->
+                    DropdownMenuItem(
+                        text = { Text(option) },
+                        trailingIcon = if (option == selected) {
+                            { Text("✓", color = colors.primary) }
+                        } else null,
+                        onClick = {
+                            expanded = false
+                            onSelected(option)
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsSwitchRow(
+    title: String,
+    iconRes: Int,
+    summary: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SettingsLeadingIcon(iconRes)
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
+    }
+}
+
+@Composable
+private fun PageScaleRow(iconRes: Int, scale: Float, onScaleChanged: (Float) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    var sliderValue by remember(scale) { mutableFloatStateOf(scale) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            SettingsLeadingIcon(iconRes)
+            Spacer(Modifier.width(16.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("页面缩放", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+                        Text("调整应用界面和文字的整体尺寸", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+                    }
+                    Text("${(sliderValue * 100).roundToInt()}%", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                }
+                Slider(
+                    value = sliderValue,
+                    onValueChange = { sliderValue = it },
+                    onValueChangeFinished = {
+                        val snapped = (sliderValue * 20f).roundToInt() / 20f
+                        sliderValue = snapped
+                        onScaleChanged(snapped)
+                    },
+                    valueRange = 0.8f..1.2f,
+                    steps = 7
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsActionRow(
+    title: String,
+    iconRes: Int,
+    summary: String,
+    onClick: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SettingsLeadingIcon(iconRes)
+        Spacer(Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
+        }
+        Icon(
+            painter = painterResource(R.drawable.ic_chevron_right),
+            contentDescription = null,
+            tint = colors.onSurfaceVariant,
+            modifier = Modifier.size(20.dp)
+        )
+    }
+}
+
+@Composable
+private fun SettingsLeadingIcon(iconRes: Int) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier.size(40.dp),
+        shape = CircleShape,
+        color = colors.secondaryContainer
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                tint = colors.onSecondaryContainer,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun AboutDeviceScreen() {
+    val context = LocalContext.current
+    val colors = MaterialTheme.colorScheme
+    var selinuxStatus by remember { mutableStateOf<String?>(null) }
+    val versionName = remember(context) {
+        try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知"
+        } catch (_: Throwable) {
+            "未知"
+        }
+    }
     LaunchedEffect(Unit) {
-        rootState = detectRoot()
+        selinuxStatus = withContext(Dispatchers.IO) { readSelinuxStatus() }
     }
 
     LazyColumn(
@@ -2331,73 +2822,27 @@ private fun AboutScreen(
             .fillMaxSize()
             .background(colors.surface)
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 8.dp, bottom = 96.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()),
+        contentPadding = PaddingValues(
+            top = 8.dp,
+            bottom = 24.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        ),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        // Hero Card: Module Status
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = colors.primaryContainer
+                shape = RoundedCornerShape(28.dp),
+                color = colors.surfaceContainerLow,
+                tonalElevation = 1.dp
             ) {
-                Column(modifier = Modifier.padding(20.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            modifier = Modifier.size(48.dp),
-                            shape = CircleShape,
-                            color = colors.primary
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    painter = painterResource(R.drawable.redmagic_black),
-                                    contentDescription = null,
-                                    modifier = Modifier.size(28.dp),
-                                    tint = Color.Unspecified
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(16.dp))
-                        Column {
-                            Text(
-                                text = "红魔助手",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = colors.onPrimaryContainer
-                            )
-                            Text(
-                                text = "v4.0.1",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = colors.onPrimaryContainer.copy(alpha = 0.8f)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // Device & Environment Info Card
-        item {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp),
-                color = colors.surfaceContainerLow
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "设备与运行环境",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.onSurface
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    EnvironmentInfoRow("设备型号", "${Build.MANUFACTURER.uppercase()} ${Build.MODEL} (${Build.DEVICE})")
-                    EnvironmentInfoRow("系统版本", "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})")
-                    EnvironmentInfoRow("Root 状态", when (rootState) {
-                        true -> "已授权 Root 权限"
-                        false -> "未检测到 Root 权限"
-                        null -> "检测中…"
-                    })
+                Column {
+                    DeviceInfoRow(R.drawable.ic_security, "SELinux状态", selinuxStatus, isLoading = selinuxStatus == null)
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp, end = 18.dp))
+                    DeviceInfoRow(R.drawable.ic_device, "设备型号", "${Build.MANUFACTURER} ${Build.MODEL}")
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp, end = 18.dp))
+                    DeviceInfoRow(R.drawable.ic_fingerprint, "系统指纹", Build.FINGERPRINT)
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp, end = 18.dp))
+                    DeviceInfoRow(R.drawable.ic_info, "软件版本", "v$versionName")
                 }
             }
         }
@@ -2405,314 +2850,90 @@ private fun AboutScreen(
 }
 
 @Composable
-private fun EnvironmentInfoRow(label: String, value: String) {
+private fun DeviceInfoRow(iconRes: Int, label: String, value: String?, isLoading: Boolean = false) {
     val colors = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.onSurfaceVariant
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color = colors.onSurface
-        )
-    }
-}
-
-/**
- * Log filter tag specification
- */
-private enum class LogFilter(val label: String) {
-    ALL("全部"),
-    GAMING("游戏"),
-    BROWSER("浏览器"),
-    SYSTEM("系统")
-}
-
-private enum class LogLevel(val label: String) {
-    ALL("全部等级"),
-    ERROR("ERROR"),
-    WARN("WARN"),
-    INFO("INFO"),
-    DEBUG("DEBUG")
-}
-
-/**
- * Real Console Log data representation
- */
-private data class ConsoleLogData(
-    val sourcePath: String,
-    val rawOutput: String,
-    val lines: List<String>
-)
-
-/**
- * Log viewing and export screen: Terminal console view displaying APK internal adaptation logs
- */
-@Composable
-private fun LogsScreen(
-    preferences: SharedPreferences,
-    onTriggerToast: (String) -> Unit,
-    onRegisterActions: (refresh: () -> Unit, export: () -> Unit, delete: () -> Unit) -> Unit
-) {
-    val colors = MaterialTheme.colorScheme
-    var selectedFilter by remember { mutableStateOf(LogFilter.ALL) }
-    var selectedLevel by remember { mutableStateOf(LogLevel.ALL) }
-    var retentionDays by remember { mutableIntStateOf(preferences.getInt("log_retention_days", 7)) }
-    var showRetentionMenu by remember { mutableStateOf(false) }
-    var logData by remember { mutableStateOf<ConsoleLogData?>(null) }
-    var isLogLoading by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val horizontalScroll = rememberScrollState()
-
-    val refreshLogs: () -> Unit = {
-        isLogLoading = true
-        AppLogger.log("INFO", "诊断引擎", "执行适配状态扫描: 类别=${selectedFilter.label}, 等级=${selectedLevel.label}")
-        scope.launch(Dispatchers.IO) {
-            val result = generateInternalAdaptationLogs(context, preferences, selectedFilter, selectedLevel)
-            withContext(Dispatchers.Main) {
-                logData = result
-                isLogLoading = false
-            }
-        }
-    }
-
-    val deleteLogs: () -> Unit = {
-        isLogLoading = true
-        scope.launch(Dispatchers.IO) {
-            try {
-                context.contentResolver.call(
-                    dev.lackluster.redmagichelper.config.ConfigProvider.CONTENT_URI,
-                    "clearHookLogs",
-                    null,
-                    null
+        SettingsLeadingIcon(iconRes)
+        Spacer(Modifier.width(16.dp))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(label, style = MaterialTheme.typography.titleSmall, color = colors.onSurfaceVariant)
+            if (isLoading) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LoadingIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = colors.primary
+                    )
+                    Text("正在检查…", style = MaterialTheme.typography.bodyMedium, color = colors.onSurface)
+                }
+            } else {
+                Text(
+                    text = value.orEmpty(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurface,
+                    softWrap = true
                 )
-            } catch (_: Throwable) {}
-            AppLogger.clear()
-            val result = generateInternalAdaptationLogs(context, preferences, selectedFilter, selectedLevel)
-            withContext(Dispatchers.Main) {
-                logData = result
-                isLogLoading = false
-                onTriggerToast("已清空所有运行日志与诊断记录")
             }
         }
     }
+}
 
-    val exportLogs: () -> Unit = {
+private fun readSelinuxStatus(): String {
+    try {
+        val enforcementFile = File("/sys/fs/selinux/enforce")
+        if (enforcementFile.canRead()) {
+            return when (enforcementFile.readText().trim()) {
+                "1" -> "Enforcing"
+                "0" -> "Permissive"
+                else -> "无法读取"
+            }
+        }
+    } catch (_: Throwable) {
+    }
+    readGetenforceStatus(listOf("/system/bin/getenforce"), 1200L)?.let { return it }
+    return readGetenforceStatus(listOf("su", "-c", "/system/bin/getenforce"), 1800L)
+        ?: "无权限（需要 Root）"
+}
+
+private fun readGetenforceStatus(command: List<String>, timeoutMillis: Long): String? {
+    var process: Process? = null
+    return try {
+        process = ProcessBuilder(command)
+            .redirectErrorStream(true)
+            .start()
+        if (!process.waitFor(timeoutMillis, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            process.destroyForcibly()
+            null
+        } else {
+            val output = process.inputStream.bufferedReader().use { it.readText().trim() }
+            if (process.exitValue() != 0) {
+                null
+            } else {
+                when (output.lowercase()) {
+                    "enforcing" -> "Enforcing"
+                    "permissive" -> "Permissive"
+                    "disabled" -> "Disabled"
+                    else -> null
+                }
+            }
+        }
+    } catch (_: Throwable) {
+        null
+    } finally {
         try {
-            val current = logData
-            val sendIntent = Intent().apply {
-                action = Intent.ACTION_SEND
-                val text = buildString {
-                    appendLine("==========================================")
-                    appendLine("[红魔助手 模块应用内适配诊断日志]")
-                    appendLine("生成时间: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())}")
-                    appendLine("诊断引擎: ${current?.sourcePath ?: "dev.lackluster.redmagichelper"}")
-                    appendLine("当前视图: 类别=${selectedFilter.label}, 等级=${selectedLevel.label} (共 ${current?.lines?.size ?: 0} 行)")
-                    appendLine("==========================================")
-                    appendLine()
-                    append(current?.rawOutput ?: "无日志内容")
-                }
-                putExtra(Intent.EXTRA_TEXT, text)
-                type = "text/plain"
-            }
-            val shareIntent = Intent.createChooser(sendIntent, "导出红魔助手适配日志")
-            context.startActivity(shareIntent)
-        } catch (e: Throwable) {
-            onTriggerToast("导出失败: ${e.message}")
+            process?.inputStream?.close()
+        } catch (_: Throwable) {
         }
-    }
-
-    LaunchedEffect(selectedFilter, selectedLevel) {
-        refreshLogs()
-    }
-
-    LaunchedEffect(Unit) {
-        onRegisterActions(refreshLogs, exportLogs, deleteLogs)
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.surface)
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .padding(bottom = 96.dp + WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding())
-    ) {
-        // Filter row 1: Category chips + Retention policy dropdown
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            LazyRow(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                contentPadding = PaddingValues(vertical = 4.dp)
-            ) {
-                items(LogFilter.values()) { filter ->
-                    val selected = selectedFilter == filter
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (selected) colors.primaryContainer else colors.surfaceContainerHigh,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(16.dp))
-                            .clickable { selectedFilter = filter }
-                    ) {
-                        Text(
-                            text = filter.label,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selected) colors.onPrimaryContainer else colors.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.width(6.dp))
-
-            // Retention Days dropdown
-            Box {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = colors.secondaryContainer,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(16.dp))
-                        .clickable { showRetentionMenu = true }
-                ) {
-                    Text(
-                        text = if (retentionDays <= 0) "保留: 永久 ▼" else "保留: ${retentionDays}天 ▼",
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.onSecondaryContainer,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
-                DropdownMenu(
-                    expanded = showRetentionMenu,
-                    onDismissRequest = { showRetentionMenu = false }
-                ) {
-                    val options = listOf(
-                        1 to "保留 1 天",
-                        3 to "保留 3 天",
-                        7 to "保留 7 天 (默认)",
-                        30 to "保留 30 天",
-                        0 to "永久保留"
-                    )
-                    options.forEach { (days, label) ->
-                        DropdownMenuItem(
-                            text = { Text(label) },
-                            onClick = {
-                                showRetentionMenu = false
-                                retentionDays = days
-                                preferences.edit().putInt("log_retention_days", days).commit()
-                                refreshLogs()
-                                onTriggerToast("已更新日志保留策略: $label")
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        // Filter row 2: Log Level chips
-        LazyRow(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 2.dp, bottom = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            items(LogLevel.values()) { level ->
-                val selected = selectedLevel == level
-                val levelColor = when (level) {
-                    LogLevel.ERROR -> colors.error
-                    LogLevel.WARN -> colors.tertiary
-                    LogLevel.INFO -> colors.primary
-                    LogLevel.DEBUG -> colors.outline
-                    LogLevel.ALL -> colors.secondary
-                }
-                Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (selected) levelColor.copy(alpha = 0.2f) else colors.surfaceContainer,
-                    border = if (selected) BorderStroke(1.dp, levelColor) else null,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { selectedLevel = level }
-                ) {
-                    Text(
-                        text = level.label,
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                        color = if (selected) levelColor else colors.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                    )
-                }
-            }
-        }
-
-        // Native Material Design 3 container box
-        Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            shape = RoundedCornerShape(16.dp),
-            color = colors.surfaceContainerLow,
-            border = BorderStroke(1.dp, colors.outlineVariant.copy(alpha = 0.5f))
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(12.dp)
-            ) {
-                if (isLogLoading) {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(36.dp),
-                            color = colors.primary,
-                            strokeWidth = 3.dp
-                        )
-                    }
-                } else {
-                    SelectionContainer {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .horizontalScroll(horizontalScroll)
-                        ) {
-                            val lines = logData?.lines.orEmpty()
-                            items(lines) { line ->
-                                val lineColor = when {
-                                    line.contains("][ERROR][") || line.contains(" ERROR ") -> colors.error
-                                    line.contains("][WARN][") || line.contains(" WARN ") -> colors.tertiary
-                                    line.contains("][INFO][") || line.contains(" INFO ") -> colors.onSurface
-                                    line.contains("][DEBUG][") || line.contains(" DEBUG ") -> colors.onSurfaceVariant
-                                    else -> colors.onSurface
-                                }
-                                Text(
-                                    text = line,
-                                    style = MaterialTheme.typography.bodySmall.copy(
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.5.sp,
-                                        lineHeight = 16.sp
-                                    ),
-                                    color = lineColor
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+        try {
+            process?.destroy()
+        } catch (_: Throwable) {
         }
     }
 }
@@ -2856,9 +3077,28 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
         "cn.zte.gamefloat"
     )
     "game_shoulder_key_enabled" -> listOf(
+        "cn.nubia.gamelauncher",
+        "com.nubia.tgkservice",
+        "cn.nubia.tgk",
         "cn.nubia.gamehelperline",
         "cn.nubia.gameassist",
         "cn.nubia.gamehelpmodule"
+    )
+    "game_shoulder_rapid_fire_multiplier" -> listOf(
+        "cn.nubia.gamelauncher",
+        "com.nubia.tgkservice",
+        "cn.nubia.tgk"
+    )
+    "game_safe_feature_gate" -> listOf(
+        "cn.nubia.gamehelperline",
+        "cn.nubia.gamelauncher",
+        "cn.nubia.gameassist",
+        "cn.nubia.gamehelpmodule"
+    )
+    "game_4d_vibration_unlimited_apps" -> listOf("cn.nubia.gameassist")
+    "game_super_resolution_suppress_toasts" -> listOf(
+        "cn.nubia.gamelauncher",
+        "cn.nubia.gameassist"
     )
     "acive_mode_switch",
     "game_super_resolution_unlimited_apps",
@@ -3006,140 +3246,5 @@ private fun inspectPackage(context: Context, packageName: String, appName: Strin
             appName = appName,
             isInstalled = false
         )
-    }
-}
-
-private fun generateInternalAdaptationLogs(
-    context: Context,
-    preferences: SharedPreferences,
-    categoryFilter: LogFilter = LogFilter.ALL,
-    levelFilter: LogLevel = LogLevel.ALL
-): ConsoleLogData {
-    val startTime = System.currentTimeMillis()
-    val lines = mutableListOf<String>()
-
-    val time = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.getDefault()).format(java.util.Date())
-    fun emit(level: String, function: String, detail: String) {
-        lines.add("[$time][$level][$function][$detail]")
-    }
-
-    emit("INFO", "DIAGNOSTIC", "RedMagic Helper 运行时适配诊断引擎就绪 (v4.0.1)")
-    emit("INFO", "DEVICE_INFO", "机型: ${Build.MANUFACTURER} ${Build.MODEL} (${Build.DEVICE}) | ROM: ${Build.DISPLAY} | API: ${Build.VERSION.SDK_INT}")
-    emit("INFO", "ACTIVE_FILTER", "当前视图: 类别=【${categoryFilter.label}】 | 等级=【${levelFilter.label}】")
-
-    // Smali nodes and hook specifications
-    if (categoryFilter == LogFilter.ALL || categoryFilter == LogFilter.SYSTEM) {
-        val isCustomFont = readBoolean(preferences, "lockscreen_custom_font_switch", false)
-        val sysFont = readText(preferences, "lockscreen_system_font_path", "")
-        val impFont = readText(preferences, "lockscreen_custom_font_imported_name", "")
-        val weight = readNumber(preferences, "lockscreen_custom_font_weight", 400)
-        val size = readNumber(preferences, "lockscreen_custom_font_size", 70)
-        val priorityFont = when {
-            sysFont.isNotBlank() -> "SystemFont:" + File(sysFont).name + " [HIGHEST PRIORITY]"
-            impFont.isNotBlank() -> "ImportedFont:$impFont"
-            else -> "Default"
-        }
-        emit("INFO", "SMALI_NODE", "Landroid/widget/TextView;->setTypeface(Landroid/graphics/Typeface;I)V [ResID 0x7f0b02c7 clock_view] -> ${if (isCustomFont) "HOOKED (ActiveFont=$priorityFont, Weight=$weight, Size=${size}px)" else "DEFAULT (Feature disabled)"}")
-        emit("INFO", "SMALI_NODE", "Lcom/zte/mifavor/keyguard/personalclock/FontResUtil;->getClockTypeface(II)Landroid/graphics/Typeface; -> ${if (isCustomFont) "HOOKED (Inject Custom Typeface: $priorityFont)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcom/zte/mifavor/keyguard/personalclock/FontResUtil;->getTypefaceByName(Ljava/lang/String;)Landroid/graphics/Typeface; -> ${if (isCustomFont) "HOOKED (Inject Custom Typeface: $priorityFont)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcom/zte/mifavor/keyguard/settings/ClockViewUtils;->refreshTextViewLayout(Landroid/widget/TextView;I)V -> ${if (isCustomFont) "HOOKED (Dynamic Typeface Injection)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcom/zte/feature/doze/AodClock/KeyguardAodClockStyle/BaseAodLockScreenClockLinearLayout;->refreshClockViewFont()V -> ${if (isCustomFont) "HOOKED (AOD Invalidation)" else "DEFAULT"}")
-
-        val skipScan = readBoolean(preferences, "skip_pkg_scan", false)
-        val hideRisk = readBoolean(preferences, "hide_evolution_mode_toggle", false)
-        val hideStore = readBoolean(preferences, "hide_store_install_prompt", false)
-        emit("INFO", "SMALI_NODE", "Lcom/android/packageinstaller/InstallStaging;->installScanningInit(Landroid/net/Uri;)V -> ${if (skipScan) "HOOKED (Bypass bindVirusService & ScanningAsyncTask 3s delay latch)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcom/android/packageinstaller/PackageUtil;->getFeatureBoolean(Ljava/lang/String;Z)Z [ZTE_FEATURE_ADB_VIRUS_SCAN] -> ${if (skipScan) "HOOKED (Force Return False)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcom/android/packageinstaller/PackageInstallerActivity;->getCookUI()Lcom/android/packageinstaller/CookUI; -> ${if (hideRisk) "HOOKED (Override cleanBgColor=true, hideWarningLayout=true)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcom/android/packageinstaller/PackageInstallerActivity;->bindUi()V -> ${if (hideStore) "HOOKED (Strip store redirect banners)" else "DEFAULT"}")
-
-        val secBypass = readBoolean(preferences, "disable_flag_secure", false)
-        emit("INFO", "SMALI_NODE", "Lcom/android/server/wm/WindowState;->isSecureLocked()Z -> ${if (secBypass) "HOOKED (Override FLAG_SECURE)" else "DEFAULT"}")
-    }
-
-    if (categoryFilter == LogFilter.ALL || categoryFilter == LogFilter.GAMING) {
-        val superRes = readBoolean(preferences, "game_super_resolution_unlimited_apps", false)
-        val comboSpeed = readBoolean(preferences, "game_space_combo_speed_enabled", false)
-        val comboRate = readNumber(preferences, "game_space_combo_speed_rate", 1)
-        emit("INFO", "SMALI_NODE", "Lcn/nubia/gameassist/gfrc/GfrcCapabilityPolicy;->isSupported()Z -> ${if (superRes) "HOOKED (Bypass GFRC/MEMC app whitelist -> Force true)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcn/nubia/gameassist/GameAssistApplication;->onCreate()V -> Feature Gate Unfreezer Active")
-        emit("INFO", "SMALI_NODE", "Lcn/nubia/gameassist/combo/ComboPlayer;->play()V -> ${if (comboSpeed) "HOOKED (Scaled Rate ${comboRate}x)" else "DEFAULT"}")
-    }
-
-    if (categoryFilter == LogFilter.ALL || categoryFilter == LogFilter.BROWSER) {
-        val skipSplash = readBoolean(preferences, "browser_skip_splash", false)
-        val removeTabs = readBoolean(preferences, "browser_remove_info_tabs", false)
-        val searchOnly = readBoolean(preferences, "browser_open_search", false)
-        emit("INFO", "SMALI_NODE", "Lcn/nubia/browser/splash/SplashActivity;->onCreate(Landroid/os/Bundle;)V -> ${if (skipSplash) "HOOKED (Skip Splash & Direct Launch)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcn/nubia/browser/homepage/ui/BottomTabBar;->initTabs()V -> ${if (removeTabs) "HOOKED (Strip Video & News Tabs)" else "DEFAULT"}")
-        emit("INFO", "SMALI_NODE", "Lcn/nubia/browser/MainActivity;->onCreate(Landroid/os/Bundle;)V -> ${if (searchOnly) "HOOKED (Redirect to Pure Search)" else "DEFAULT"}")
-    }
-
-    // Read real cross-process runtime hook events from ConfigProvider / HookRuntimeLogStore
-    val runtimeHookLogs = readHookRuntimeLogs(context)
-        .filter { matchesHookLogFilter(it, categoryFilter) }
-    if (runtimeHookLogs.isNotEmpty()) {
-        emit("INFO", "RUNTIME_HOOK", "=== 捕获到 ${runtimeHookLogs.size} 条跨进程 Hook 真实运行事件 ===")
-        lines.addAll(runtimeHookLogs)
-    } else {
-        emit("INFO", "RUNTIME_HOOK", "当前筛选下暂无跨进程运行时事件（操作对应系统应用后将自动捕获记录）")
-    }
-
-    // AppLogger events
-    val recentLogs = AppLogger.getRecentLogs()
-    if (recentLogs.isNotEmpty()) {
-        lines.addAll(recentLogs)
-    }
-
-    // Apply level filter
-    val filteredLines = if (levelFilter == LogLevel.ALL) {
-        lines
-    } else {
-        lines.filter { line ->
-            when (levelFilter) {
-                LogLevel.ERROR -> line.contains("][ERROR][") || line.contains(" ERROR ")
-                LogLevel.WARN -> line.contains("][WARN][") || line.contains(" WARN ")
-                LogLevel.INFO -> line.contains("][INFO][") || line.contains(" INFO ")
-                LogLevel.DEBUG -> line.contains("][DEBUG][") || line.contains(" DEBUG ")
-                else -> true
-            }
-        }
-    }
-
-    val elapsed = System.currentTimeMillis() - startTime
-    val finalLines = filteredLines.toMutableList()
-    finalLines.add("[$time][INFO][DIAGNOSTIC][诊断扫描完成: 共 ${finalLines.size} 条信息，耗时 ${elapsed}ms]")
-
-    return ConsoleLogData(
-        sourcePath = "dev.lackluster.redmagichelper.internal",
-        rawOutput = finalLines.joinToString("\n"),
-        lines = finalLines
-    )
-}
-
-private fun readHookRuntimeLogs(context: Context): List<String> {
-    return try {
-        val result = context.contentResolver.call(
-            dev.lackluster.redmagichelper.config.ConfigProvider.CONTENT_URI,
-            "getHookLogs",
-            null,
-            null
-        ) ?: return emptyList()
-        if (!result.getBoolean("success", false)) return emptyList()
-        result.getStringArrayList("lines")?.toList().orEmpty()
-    } catch (_: Throwable) {
-        emptyList()
-    }
-}
-
-private fun matchesHookLogFilter(line: String, filter: LogFilter): Boolean {
-    if (filter == LogFilter.ALL) return true
-    val isGaming = line.contains("[游戏优化]")
-    val isBrowser = line.contains("[浏览器适配]")
-    return when (filter) {
-        LogFilter.ALL -> true
-        LogFilter.GAMING -> isGaming
-        LogFilter.BROWSER -> isBrowser
-        LogFilter.SYSTEM -> !isGaming && !isBrowser
     }
 }

@@ -1,8 +1,6 @@
 package dev.lackluster.redmagichelper.hook;
 
 import android.content.SharedPreferences;
-import android.content.ContentResolver;
-import android.content.Context;
 import android.content.pm.ApplicationInfo;
 
 import java.lang.reflect.Method;
@@ -50,29 +48,19 @@ public final class HookEntry extends XposedModule {
 
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
-        HookLog.attach(this, resolveContentResolver(
-                "system".equals(param.getProcessName())));
-        HookLog.info("entry", "MODULE_LOADED process=" + param.getProcessName()
-                + " api=" + getApiVersion()
-                + " framework=" + getFrameworkName()
-                + " version=" + getFrameworkVersion());
         refreshPreferences();
     }
 
     @Override
     public void onPackageReady(XposedModuleInterface.PackageReadyParam param) {
         String packageName = normalizePackageName(param.getPackageName());
-        HookLog.attach(this, resolveContentResolver("android".equals(packageName)));
         boolean firstPackage = param.isFirstPackage();
-        HookLog.info("entry", "PACKAGE_READY package=" + packageName
-                + " first=" + firstPackage);
         // On some LSPosed/RedMagic builds the framework callback arrives as a
         // non-first PackageReadyParam even though it is the only callback for
         // system_server. Do not discard that callback; otherwise every
         // SystemServerAdapter feature silently remains uninstalled.
         // Do not skip if this package or its process is one of our target adapters
         if (!firstPackage && !"android".equals(packageName) && adapterFor(packageName) == null) {
-            HookLog.info("entry", "PACKAGE_SKIPPED_NOT_FIRST package=" + packageName);
             return;
         }
         rememberTarget(packageName, param.getClassLoader(), param.getApplicationInfo());
@@ -82,7 +70,6 @@ public final class HookEntry extends XposedModule {
 
     @Override
     public void onSystemServerStarting(XposedModuleInterface.SystemServerStartingParam param) {
-        HookLog.attach(this, resolveContentResolver(true));
         refreshPreferences();
         rememberTarget("android", param.getClassLoader(), null);
         installForPackage("android", param.getClassLoader(), null);
@@ -96,8 +83,6 @@ public final class HookEntry extends XposedModule {
 
     @Override
     public void onHotReloaded(XposedModuleInterface.HotReloadedParam param) {
-        HookLog.attach(this, resolveContentResolver(
-                "system".equals(param.getProcessName())));
         for (XposedInterface.HookHandle handle : param.getOldHookHandles()) {
             try {
                 handle.unhook();
@@ -149,19 +134,17 @@ public final class HookEntry extends XposedModule {
             }
         }
         if (classLoader == null) {
-            HookLog.missing("entry", "HOT_RELOAD_TARGET_CLASSLOADER");
+            HookLog.error("entry", "HOT_RELOAD_TARGET_CLASSLOADER",
+                    new IllegalStateException("No class loader available for " + packageName));
         } else {
             installForPackage(packageName, classLoader, applicationInfo);
         }
-        HookLog.info("entry", "HOT_RELOADED process=" + param.getProcessName()
-                + " reinstall=" + packageName);
     }
 
     private void refreshPreferences() {
         try {
             SharedPreferences remote = getRemotePreferences("config");
             config = new ModuleConfig(remote);
-            HookLog.info("entry", "CONFIG_READ enabled=" + config.enabled());
         } catch (Throwable error) {
             config = new ModuleConfig(null);
             HookLog.error("entry", "REMOTE_PREFS_UNAVAILABLE", error);
@@ -169,10 +152,8 @@ public final class HookEntry extends XposedModule {
     }
 
     private void installForPackage(String packageName, ClassLoader classLoader, ApplicationInfo info) {
-        HookLog.info("entry", "INSTALL_BEGIN package=" + packageName);
         ModuleConfig current = config;
         if (current == null || !current.enabled()) {
-            HookLog.info(packageName, "MODULE_DISABLED");
             return;
         }
 
@@ -182,13 +163,12 @@ public final class HookEntry extends XposedModule {
         }
         HostAdapter adapter = adapterFor(packageName);
         if (adapter == null) {
-            HookLog.info(packageName, "NO_ADAPTER_FOR_PACKAGE");
             return;
         }
         try {
             adapter.install(session);
         } catch (Throwable error) {
-            HookLog.error(packageName, "ADAPTER_FAILED", error);
+            session.recordFailure("ADAPTER_FAILED", error);
             session.unhookAll();
         } finally {
             session.logScanSummary();
@@ -241,29 +221,6 @@ public final class HookEntry extends XposedModule {
         lastPackageName = normalizePackageName(packageName);
         lastClassLoader = classLoader;
         lastApplicationInfo = applicationInfo;
-    }
-
-    private static ContentResolver resolveContentResolver(boolean allowSystemContext) {
-        try {
-            Class<?> activityThread = Class.forName("android.app.ActivityThread");
-            Object thread = activityThread.getMethod("currentActivityThread").invoke(null);
-            if (thread != null) {
-                Object application = activityThread.getMethod("getApplication").invoke(thread);
-                if (application instanceof Context) {
-                    return ((Context) application).getContentResolver();
-                }
-                if (allowSystemContext) {
-                    Object systemContext = activityThread.getMethod("getSystemContext")
-                            .invoke(thread);
-                    if (systemContext instanceof Context) {
-                        return ((Context) systemContext).getContentResolver();
-                    }
-                }
-            }
-        } catch (Throwable ignored) {
-            // The provider is optional while a process is still initializing.
-        }
-        return null;
     }
 
     private static String normalizePackageName(String packageName) {

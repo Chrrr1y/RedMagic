@@ -272,80 +272,74 @@ public final class NeoStoreAdapter implements HostAdapter {
     }
 
     private static void installDownloadQueueOptimization(HookSession session) {
-        int requested = HookValues.clamp(
-                session.config().getInt("neostore_download_count", 5), 1, 32);
-        boolean gameCenter = "cn.nubia.neogamecenter".equals(session.packageName());
-        boolean installed = false;
+        try {
+            int requested = HookValues.clamp(
+                    session.config().getInt("neostore_download_count", 5), 1, 32);
+            boolean gameCenter = "cn.nubia.neogamecenter".equals(session.packageName());
+            boolean installed = false;
 
-        if (gameCenter) {
-            // NeoGameCenter ships the same downloader under its obfuscated
-            // n0.* package.  h()/t0() are the real thread-count/mode accessors
-            // used by DownloadService; n0.j0 itself is abstract, so prefer the
-            // concrete singleton class and let HookSession walk its parent.
-            // The downloaded NeoGameCenter build keeps the thread-count
-            // accessors on n0.j0. n0.t0 is a separate singleton in this
-            // release, so it must remain a fallback rather than the first
-            // candidate.
-            Class<?> config = session.findClass("n0.j0", "n0.t0");
-            if (config != null) {
-                session.hook(config, "h", chain -> requested);
-                session.hook(config, "t0", chain -> requested);
-                installed = true;
+            if (gameCenter) {
+                // NeoGameCenter ships the downloader under n0.* and o4.* packages.
+                // h()/t0()/H() return int thread-count / mode.
+                Class<?> config = session.findOptionalClass("n0.j0", "n0.t0");
+                if (config != null) {
+                    session.hook(config, "h", chain -> requested);
+                    session.hook(config, "t0", chain -> requested);
+                    session.hook(config, "H", chain -> requested);
+                    installed = true;
+                }
+                Class<?> queue = session.findOptionalClass("o4.j", "p4.j");
+                if (queue != null) {
+                    session.hook(queue, "f", chain -> {
+                        if (!chain.getArgs().isEmpty()) {
+                            return HookValues.proceedWithArgument(chain, 0, requested);
+                        }
+                        return chain.proceed();
+                    }, int.class);
+                    installed = true;
+                }
+            } else {
+                Class<?> config = session.findOptionalClass("cn.nubia.neostore.model.ConfigMgrImp");
+                if (config != null) {
+                    // H0() returns int (multi_download_thread_num).
+                    // N0() returns int (getDownloadThreadNumber temperature-adjusted pool size).
+                    // h() returns int (download_thread_mode).
+                    session.hook(config, "H0", chain -> requested);
+                    session.hook(config, "N0", chain -> requested);
+                    session.hook(config, "h", chain -> requested);
+                    installed = true;
+                }
+                Class<?> downloadService = session.findOptionalClass(
+                        "cn.nubia.neostore.service.DownloadService");
+                if (downloadService != null) {
+                    session.hook(downloadService, "f", chain -> {
+                        if (!chain.getArgs().isEmpty()) {
+                            return HookValues.proceedWithArgument(chain, 0, requested);
+                        }
+                        return chain.proceed();
+                    }, int.class);
+                    installed = true;
+                }
+                Class<?> queue = session.findOptionalClass("p5.o", "o5.o");
+                if (queue != null) {
+                    session.hook(queue, "e", chain -> {
+                        if (!chain.getArgs().isEmpty()) {
+                            return HookValues.proceedWithArgument(chain, 0, requested);
+                        }
+                        return chain.proceed();
+                    }, int.class);
+                    installed = true;
+                }
             }
-            Class<?> queue = session.findClass("o4.j");
-            if (queue != null) {
-                session.hook(queue, "f", chain -> {
-                    if (!chain.getArgs().isEmpty()) {
-                        return HookValues.proceedWithArgument(chain, 0, requested);
-                    }
-                    return chain.proceed();
-                }, int.class);
-                installed = true;
-            }
-        } else {
-            Class<?> config = session.findClass("cn.nubia.neostore.model.ConfigMgrImp");
-            if (config != null) {
-                // H0() is the server-provided string setting in the shipped
-                // build. Keep its return type intact while changing the
-                // configured value; E0/K0 are the runtime integer and
-                // thermal adjustment paths.
-                session.hook(config, "H0", chain -> String.valueOf(requested));
-                // E0() reads the server's multi_download_thread_num value and
-                // is consumed when the segmented downloader is initialized.
-                session.hook(config, "E0", chain -> requested);
-                // K0() is the runtime adjustment path used by temperature and
-                // network changes. Keep the pool at the configured size.
-                session.hook(config, "K0", chain -> requested);
-                installed = true;
-            }
-            Class<?> downloadService = session.findClass(
-                    "cn.nubia.neostore.service.DownloadService");
-            if (downloadService != null) {
-                session.hook(downloadService, "f", chain -> {
-                    if (!chain.getArgs().isEmpty()) {
-                        return HookValues.proceedWithArgument(chain, 0, requested);
-                    }
-                    return chain.proceed();
-                }, int.class);
-                installed = true;
-            }
-            Class<?> queue = session.findClass("o5.o");
-            if (queue != null) {
-                session.hook(queue, "e", chain -> {
-                    if (!chain.getArgs().isEmpty()) {
-                        return HookValues.proceedWithArgument(chain, 0, requested);
-                    }
-                    return chain.proceed();
-                }, int.class);
-                installed = true;
-            }
-        }
 
-        if (installed) {
-            session.log("NEOSTORE_DOWNLOAD_QUEUE_HOOKED count=" + requested
-                    + " target=" + session.packageName());
-        } else {
-            session.missing("download-thread-capability");
+            if (installed) {
+                session.log("NEOSTORE_DOWNLOAD_QUEUE_HOOKED count=" + requested
+                        + " target=" + session.packageName());
+            } else {
+                session.missing("download-thread-capability");
+            }
+        } catch (Throwable t) {
+            session.log("NEOSTORE_DOWNLOAD_QUEUE_FAILED " + t.getMessage());
         }
     }
 

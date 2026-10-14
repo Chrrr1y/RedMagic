@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/app_splash_background</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/app_splash_icon_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/redmagic_splash</item>
+        <item name="windowSplashScreenAnimationDuration">400</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.Content</item>
+    </style>
+
+    <style name="AppTheme.Content" parent="android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowBackground">@color/app_splash_background</item>
+        <item name="android:navigationBarColor">@color/app_splash_background</item>
+        <item name="android:statusBarColor">@color/app_splash_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:colorAccent">#d32f2f</item>
+    </style>
+</resources>

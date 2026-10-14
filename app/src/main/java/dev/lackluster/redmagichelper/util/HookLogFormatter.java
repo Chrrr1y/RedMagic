@@ -4,17 +4,6 @@ public final class HookLogFormatter {
     private HookLogFormatter() {
     }
 
-    public static String format(
-            String time,
-            String level,
-            String feature,
-            String hostPackage,
-            String message
-    ) {
-        return "[" + clean(time) + "][" + clean(level) + "][" + clean(feature)
-                + "][host=" + clean(hostPackage) + "][" + clean(message) + "]";
-    }
-
     public static String compactError(Throwable error) {
         if (error == null) {
             return "";

@@ -98,39 +98,8 @@ public final class SystemUiAdapter implements HostAdapter {
     private static void installLockScreenClockFont(HookSession session) {
         session.logSmali("Lcom/android/systemui/lockscreen/CustomClockFont;", "INIT: Registering lockscreen clock font hooks");
 
-        // 1. Hook ZTE personalclock FontResUtil
-        Class<?> fontResUtil = session.findOptionalClass("com.zte.mifavor.keyguard.personalclock.FontResUtil");
-        if (fontResUtil != null) {
-            session.hook(fontResUtil, "getClockTypeface", chain -> {
-                ModuleConfig cfg = session.config();
-                if (!cfg.getBoolean("lockscreen_custom_font_switch", false)) {
-                    return chain.proceed();
-                }
-                Typeface tf = getLockscreenTypeface(getAnyContext(), session, cfg);
-                if (tf != null) {
-                    session.logSmali("Lcom/zte/mifavor/keyguard/personalclock/FontResUtil;->getClockTypeface(II)Landroid/graphics/Typeface;",
-                            "RETURN custom Typeface");
-                    return tf;
-                }
-                return chain.proceed();
-            }, int.class, int.class);
-
-            session.hook(fontResUtil, "getTypefaceByName", chain -> {
-                ModuleConfig cfg = session.config();
-                if (!cfg.getBoolean("lockscreen_custom_font_switch", false)) {
-                    return chain.proceed();
-                }
-                Typeface tf = getLockscreenTypeface(getAnyContext(), session, cfg);
-                if (tf != null) {
-                    session.logSmali("Lcom/zte/mifavor/keyguard/personalclock/FontResUtil;->getTypefaceByName(Ljava/lang/String;)Landroid/graphics/Typeface;",
-                            "RETURN custom Typeface for " + chain.getArgs().get(0));
-                    return tf;
-                }
-                return chain.proceed();
-            }, String.class);
-        }
-
-        // 2. Hook TextView.setTypeface
+        // 1. Hook TextView.setTypeface. AOD is excluded by the view
+        // classifier below, so its original typeface and size remain intact.
         session.hook(TextView.class, "setTypeface", chain -> {
             Object view = chain.getThisObject();
             ModuleConfig cfg = session.config();
@@ -231,7 +200,7 @@ public final class SystemUiAdapter implements HostAdapter {
             return result;
         }, int.class);
 
-        // 3. Hook TextView.onAttachedToWindow
+        // 2. Hook TextView.onAttachedToWindow
         session.hook(TextView.class, "onAttachedToWindow", chain -> {
             Object result = chain.proceed();
             Object viewObj = chain.getThisObject();
@@ -243,7 +212,7 @@ public final class SystemUiAdapter implements HostAdapter {
             return result;
         });
 
-        // 4. Hook Mifavor TextClock
+        // 3. Hook Mifavor TextClock
         Class<?> textClockCls = session.findOptionalClass("com.zte.mifavor.views.TextClock");
         if (textClockCls != null) {
             session.hookAny(textClockCls, new String[]{"onAttachedToWindow", "onTimeChanged", "refreshTime"}, chain -> {
@@ -259,7 +228,7 @@ public final class SystemUiAdapter implements HostAdapter {
             });
         }
 
-        // 5. Hook Clock styles & containers
+        // 4. Hook normal lockscreen clock styles and containers.
         String[] clockStyleClasses = new String[]{
                 "com.zte.mifavor.keyguard.settings.BaseLockScreenClock",
                 "com.zte.mifavor.keyguard.settings.LockScreenClockDefault",
@@ -269,12 +238,6 @@ public final class SystemUiAdapter implements HostAdapter {
                 "com.zte.mifavor.keyguard.settings.LockScreenClockArtword",
                 "com.zte.mifavor.keyguard.settings.LockScreenClockIncarnation",
                 "com.zte.mifavor.keyguard.settings.LockScreenClockStyleItem",
-                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.BaseAodLockScreenClockLinearLayout",
-                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockDefault",
-                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockClip",
-                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockHorizen",
-                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockVertical",
-                "com.zte.feature.doze.AodClock.KeyguardAodClockStyle.AodLockScreenClockDual"
         };
         for (String clsName : clockStyleClasses) {
             Class<?> cls = session.findOptionalClass(clsName);
@@ -296,7 +259,7 @@ public final class SystemUiAdapter implements HostAdapter {
             }
         }
 
-        // 6. Hook ClockViewUtils.refreshTextViewLayout
+        // 5. Hook ClockViewUtils.refreshTextViewLayout
         Class<?> clockUtils = session.findOptionalClass("com.zte.mifavor.keyguard.settings.ClockViewUtils");
         if (clockUtils != null) {
             session.hook(clockUtils, "refreshTextViewLayout", chain -> {
@@ -324,7 +287,7 @@ public final class SystemUiAdapter implements HostAdapter {
             }, TextView.class, int.class);
         }
 
-        // 7. KeyguardStatusView
+        // 6. KeyguardStatusView
         Class<?> statusView = session.findOptionalClass("com.zte.mifavor.keyguard.KeyguardStatusView");
         if (statusView != null) {
             session.hook(statusView, "onFinishInflate", chain -> {
@@ -401,7 +364,7 @@ public final class SystemUiAdapter implements HostAdapter {
     }
 
     private static boolean isLockScreenDateView(Object obj) {
-        if (!(obj instanceof View)) {
+        if (!(obj instanceof View) || isAodView(obj)) {
             return false;
         }
         View view = (View) obj;
@@ -458,7 +421,7 @@ public final class SystemUiAdapter implements HostAdapter {
     }
 
     private static boolean isLockScreenClockView(Object obj) {
-        if (!(obj instanceof View)) return false;
+        if (!(obj instanceof View) || isAodView(obj)) return false;
         View view = (View) obj;
         if (sSavedContext == null && view.getContext() != null) {
             sSavedContext = view.getContext().getApplicationContext();
@@ -479,8 +442,10 @@ public final class SystemUiAdapter implements HostAdapter {
         while (parent instanceof View && depth++ < 6) {
             View pv = (View) parent;
             String pvClassName = pv.getClass().getName();
+            if (isAodView(pv)) {
+                return false;
+            }
             if (pvClassName.contains("LockScreenClock")
-                    || pvClassName.contains("AodClock")
                     || pvClassName.contains("ClockStatusView")
                     || pvClassName.contains("KeyguardStatusView")) {
                 if (view instanceof TextView) return true;
@@ -497,6 +462,38 @@ public final class SystemUiAdapter implements HostAdapter {
                 }
             } catch (Throwable ignored) {}
             parent = pv.getParent();
+        }
+        return false;
+    }
+
+    private static boolean isAodView(Object obj) {
+        if (!(obj instanceof View)) {
+            return false;
+        }
+        View current = (View) obj;
+        for (int depth = 0; current != null && depth++ < 8; depth++) {
+            String className = current.getClass().getName().toLowerCase(Locale.ROOT);
+            if (className.contains("aod")
+                    || className.contains("doze")
+                    || className.contains("alwaysondisplay")
+                    || className.contains("screenoff")) {
+                return true;
+            }
+            try {
+                if (current.getId() != View.NO_ID) {
+                    String resourceName = current.getResources()
+                            .getResourceEntryName(current.getId()).toLowerCase(Locale.ROOT);
+                    if (resourceName.contains("aod")
+                            || resourceName.contains("doze")
+                            || resourceName.contains("screen_off")
+                            || resourceName.contains("screenoff")) {
+                        return true;
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+            ViewParent parent = current.getParent();
+            current = parent instanceof View ? (View) parent : null;
         }
         return false;
     }
