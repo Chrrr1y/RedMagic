@@ -214,20 +214,25 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        // Unlock high refresh rate (120Hz / 144Hz) on supported displays
-        runCatching {
-            val currentDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                display
-            } else {
-                @Suppress("DEPRECATION")
-                windowManager.defaultDisplay
-            }
-            val highestMode = currentDisplay?.supportedModes?.maxByOrNull { it.refreshRate }
-            if (highestMode != null) {
-                val lp = window.attributes
-                lp.preferredDisplayModeId = highestMode.modeId
-                lp.preferredRefreshRate = highestMode.refreshRate
-                window.attributes = lp
+        // Unlock high refresh rate (120Hz / 144Hz) asynchronously after initial window attachment
+        // to avoid stalling first frame rendering with synchronous DisplayManager IPC.
+        window.decorView.post {
+            runCatching {
+                val currentDisplay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    display
+                } else {
+                    @Suppress("DEPRECATION")
+                    windowManager.defaultDisplay
+                }
+                val highestMode = currentDisplay?.supportedModes?.maxByOrNull { it.refreshRate }
+                if (highestMode != null) {
+                    val lp = window.attributes
+                    if (lp.preferredDisplayModeId != highestMode.modeId) {
+                        lp.preferredDisplayModeId = highestMode.modeId
+                        lp.preferredRefreshRate = highestMode.refreshRate
+                        window.attributes = lp
+                    }
+                }
             }
         }
 
@@ -332,12 +337,17 @@ private fun RedMagicTheme(
     )
 }
 
+private val dynamicColorSchemeCache = java.util.concurrent.ConcurrentHashMap<String, ColorScheme>()
+
 private fun makeDynamicColorScheme(
     seedColor: Color,
     isDark: Boolean,
     styleName: String,
     specName: String
 ): ColorScheme {
+    val cacheKey = "${seedColor.value}_${isDark}_${styleName}_${specName}"
+    dynamicColorSchemeCache[cacheKey]?.let { return it }
+
     val style = styleName.takeIf { it in colorStyleOptions } ?: "TonalSpot"
     val requestedSpec = runCatching { ColorSpec.SpecVersion.valueOf(specName) }
         .getOrDefault(ColorSpec.SpecVersion.SPEC_2025)
@@ -360,7 +370,9 @@ private fun makeDynamicColorScheme(
         "Content" -> SchemeContent(sourceColor, isDark, 0.0, spec)
         else -> SchemeTonalSpot(sourceColor, isDark, 0.0, spec)
     }
-    return dynamicScheme.toMaterialColorScheme()
+    val scheme = dynamicScheme.toMaterialColorScheme()
+    dynamicColorSchemeCache[cacheKey] = scheme
+    return scheme
 }
 
 private fun DynamicScheme.toMaterialColorScheme(): ColorScheme {

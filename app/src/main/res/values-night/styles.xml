@@ -2,11 +2,17 @@
 <resources>
     <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <item name="android:windowBackground">@color/app_splash_background</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
         <item name="android:colorAccent">#d32f2f</item>
+
+        <!-- Android 12+ Native StartingWindow / SplashScreen -->
+        <item name="android:windowSplashScreenBackground">@color/app_splash_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_splash_icon</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">@color/app_splash_icon_background</item>
+        <item name="android:windowSplashScreenAnimationDuration">0</item>
     </style>
 </resources>

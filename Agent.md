@@ -2,7 +2,7 @@
 
 ## Versioning
 
-- The base application version is `4.0.3`.
+- The base application version is `4.0.4`.
 - Never append `-rewrite` to `versionName`.
 - Every local build gets an automatic numeric `versionCode` from the current Unix timestamp unless `VERSION_CODE` is explicitly provided.
 - CI or release scripts may provide `VERSION_CODE`, `VERSION_NAME`, and `RELEASE_TAG` through the environment.

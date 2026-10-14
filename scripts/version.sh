@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-version_name="${VERSION_NAME:-4.0.3}"
+version_name="${VERSION_NAME:-4.0.4}"
 version_name="${version_name%-rewrite}"
 version_code="${VERSION_CODE:-$(date -u +%s)}"
 release_tag="${RELEASE_TAG:-v${version_name}-build-${version_code}}"

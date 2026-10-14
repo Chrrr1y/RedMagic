@@ -10,7 +10,7 @@ def releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
 def hasReleaseSigning = releaseStoreFile && releaseStorePassword
         && releaseKeyAlias && releaseKeyPassword
-def defaultVersionName = "4.0.3"
+def defaultVersionName = "4.0.4"
 def buildVersionName = (System.getenv("VERSION_NAME") ?: defaultVersionName)
         .replaceFirst(/-rewrite$/, "")
 def autoVersionCode = (System.currentTimeMillis() / 1000L) as int
