@@ -4,6 +4,16 @@ public final class HookLogFormatter {
     private HookLogFormatter() {
     }
 
+    public static String format(String time, String level, String tag, String host, String message) {
+        StringBuilder sb = new StringBuilder();
+        if (time != null && !time.isEmpty()) sb.append("[").append(time).append("]");
+        if (level != null && !level.isEmpty()) sb.append("[").append(level).append("]");
+        if (tag != null && !tag.isEmpty()) sb.append("[").append(tag).append("]");
+        if (host != null && !host.isEmpty()) sb.append("[host=").append(host).append("]");
+        if (message != null && !message.isEmpty()) sb.append("[").append(clean(message)).append("]");
+        return sb.toString();
+    }
+
     public static String compactError(Throwable error) {
         if (error == null) {
             return "";
