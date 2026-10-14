@@ -144,7 +144,6 @@ dependencies {
     implementation "androidx.compose.material:material-android"
     implementation "androidx.compose.material3:material3-android:1.5.0-beta01"
     implementation "androidx.compose.runtime:runtime-android"
-    implementation "androidx.core:core-splashscreen:1.0.1"
     implementation "androidx.navigationevent:navigationevent-compose:1.1.2"
     implementation "top.yukonga.miuix.kmp:miuix-nav-android:0.9.4"
     implementation "org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0"

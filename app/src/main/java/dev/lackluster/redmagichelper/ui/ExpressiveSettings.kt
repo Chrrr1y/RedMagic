@@ -25,7 +25,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -212,10 +211,7 @@ private val colorSpecOptions = listOf("SPEC_2025", "SPEC_2021")
  */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        val splashScreen = installSplashScreen()
-        var splashContentReady = false
         super.onCreate(savedInstanceState)
-        splashScreen.setKeepOnScreenCondition { !splashContentReady }
         enableEdgeToEdge()
 
         // Unlock high refresh rate (120Hz / 144Hz) on supported displays
@@ -240,9 +236,6 @@ class MainActivity : ComponentActivity() {
         val initialAppearance = AppearanceSettings.read(appearancePreferences)
         setContent {
             var appearance by remember { mutableStateOf(initialAppearance) }
-            SideEffect {
-                splashContentReady = true
-            }
             val systemDensity = LocalDensity.current
             val scaledDensity = remember(systemDensity.density, systemDensity.fontScale, appearance.pageScale) {
                 Density(systemDensity.density * appearance.pageScale, systemDensity.fontScale)
@@ -2609,41 +2602,40 @@ private fun SettingsDropdownRow(
 ) {
     val colors = MaterialTheme.colorScheme
     var expanded by remember(title) { mutableStateOf(false) }
-    Box {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = true }
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = true }
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SettingsLeadingIcon(iconRes)
+        Spacer(Modifier.width(16.dp))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            SettingsLeadingIcon(iconRes)
-            Spacer(Modifier.width(16.dp))
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = colors.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = summary,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(Modifier.width(12.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = colors.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = summary,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Box(modifier = Modifier.align(Alignment.CenterVertically)) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = colors.secondaryContainer.copy(alpha = 0.65f),
-                contentColor = colors.onSecondaryContainer,
-                modifier = Modifier.align(Alignment.CenterVertically)
+                contentColor = colors.onSecondaryContainer
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
@@ -2665,24 +2657,24 @@ private fun SettingsDropdownRow(
                     )
                 }
             }
-        }
-        if (expanded) {
-            DropdownMenu(
-                expanded = true,
-                onDismissRequest = { expanded = false },
-                modifier = Modifier.background(colors.surfaceContainerHigh)
-            ) {
-                options.forEach { option ->
-                    DropdownMenuItem(
-                        text = { Text(option) },
-                        trailingIcon = if (option == selected) {
-                            { Text("✓", color = colors.primary) }
-                        } else null,
-                        onClick = {
-                            expanded = false
-                            onSelected(option)
-                        }
-                    )
+            if (expanded) {
+                DropdownMenu(
+                    expanded = true,
+                    onDismissRequest = { expanded = false },
+                    modifier = Modifier.background(colors.surfaceContainerHigh)
+                ) {
+                    options.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            trailingIcon = if (option == selected) {
+                                { Text("✓", color = colors.primary) }
+                            } else null,
+                            onClick = {
+                                expanded = false
+                                onSelected(option)
+                            }
+                        )
+                    }
                 }
             }
         }
