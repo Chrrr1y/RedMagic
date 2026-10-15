@@ -913,9 +913,17 @@ public final class BrowserAdapter implements HostAdapter {
                     String name = act.getClass().getName();
                     if (name.contains("BrowserSettingActivity") ||
                             name.contains("SkinActivity") ||
+                            name.contains("SearchActivity") ||
+                            name.contains("ComboViewActivity") ||
                             (name.contains("Setting") && !dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isNativeAdapted(act))) {
-                        dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.updateSystemBars(
-                                act, dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isDarkTheme(act));
+                        if (dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isNativeAdapted(act) ||
+                                name.contains("SearchActivity") ||
+                                name.contains("ComboViewActivity")) {
+                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                        } else {
+                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.updateSystemBars(
+                                    act, dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isDarkTheme(act));
+                        }
                         return null;
                     }
                 }
@@ -1051,6 +1059,8 @@ public final class BrowserAdapter implements HostAdapter {
                             String name = ctx.getClass().getName();
                             if (name.contains("BrowserSettingActivity") ||
                                     name.contains("SkinActivity") ||
+                                    name.contains("SearchActivity") ||
+                                    name.contains("ComboViewActivity") ||
                                     (name.contains("Setting") && !dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isNativeAdapted((Activity) ctx))) {
                                 return chain.getArg(2);
                             }
@@ -1583,10 +1593,64 @@ public final class BrowserAdapter implements HostAdapter {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
             if (owner instanceof Activity) {
-                applySearchStatusBarInsets((Activity) owner);
+                Activity act = (Activity) owner;
+                applySearchStatusBarInsets(act);
+                act.getWindow().getDecorView().post(() -> {
+                    applySearchStatusBarInsets(act);
+                });
             }
             return result;
         }, Bundle.class);
+
+        session.hook(searchActivity, "onResume", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                Activity act = (Activity) owner;
+                act.getWindow().getDecorView().post(() -> {
+                    applySearchStatusBarInsets(act);
+                });
+            }
+            return result;
+        });
+
+        Class<?> configClz = session.findOptionalClass("android.content.res.Configuration");
+        if (configClz != null) {
+            session.hook(searchActivity, "onConfigurationChanged", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity) {
+                    Activity act = (Activity) owner;
+                    act.getWindow().getDecorView().post(() -> {
+                        applySearchStatusBarInsets(act);
+                    });
+                }
+                return result;
+            }, configClz);
+        }
+
+        session.hook(searchActivity, "onTextChanged", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                applySearchStatusBarInsets((Activity) owner);
+            }
+            return result;
+        }, CharSequence.class, int.class, int.class, int.class);
+
+        Class<?> searchObserver = session.findOptionalClass("com.android.browser.SearchActivity$4");
+        if (searchObserver != null) {
+            session.hook(searchObserver, "onChanged", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                Object actObj = HookValues.readField(owner, "a");
+                if (actObj instanceof Activity) {
+                    applySearchStatusBarInsets((Activity) actObj);
+                }
+                return result;
+            });
+        }
+
         session.log("BROWSER_SEARCH_STATUS_BAR_ADAPTIVE_HOOKED");
     }
 
@@ -1634,6 +1698,41 @@ public final class BrowserAdapter implements HostAdapter {
             }
             return result;
         });
+
+        Class<?> historyPage = session.findOptionalClass("com.android.browser.BrowserHistoryPage");
+        if (historyPage != null) {
+            session.hook(historyPage, "M", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof android.app.Fragment) {
+                    Activity act = ((android.app.Fragment) owner).getActivity();
+                    if (act != null) {
+                        act.getWindow().getDecorView().post(() -> {
+                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                        });
+                    }
+                }
+                return result;
+            }, boolean.class);
+        }
+
+        Class<?> historyWatcher = session.findOptionalClass("com.android.browser.BrowserHistoryPage$2");
+        if (historyWatcher != null) {
+            session.hook(historyWatcher, "onTextChanged", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                Object pageObj = HookValues.readField(owner, "n");
+                if (pageObj instanceof android.app.Fragment) {
+                    Activity act = ((android.app.Fragment) pageObj).getActivity();
+                    if (act != null) {
+                        act.getWindow().getDecorView().post(() -> {
+                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                        });
+                    }
+                }
+                return result;
+            }, CharSequence.class, int.class, int.class, int.class);
+        }
 
         session.log("BROWSER_COMBO_STATUS_BAR_ADAPTIVE_HOOKED");
     }

@@ -391,25 +391,50 @@ object BrowserSettingsCompose {
     @JvmStatic
     fun applyNativeStatusBarAdaptive(activity: Activity) {
         try {
+            nativeAdaptedActivities.add(activity)
             val window = activity.window ?: return
             val decor = window.decorView
             val content = decor.findViewById<ViewGroup>(android.R.id.content) ?: decor as? ViewGroup ?: return
             val isDark = isDarkTheme(activity)
+            val activityName = activity.javaClass.name
 
-            var topColor = if (isDark) android.graphics.Color.parseColor("#121212") else android.graphics.Color.WHITE
-            val tabsId = activity.resources.getIdentifier("tabsContainer", "id", activity.packageName)
-            val titleBarId = activity.resources.getIdentifier("title_bar", "id", activity.packageName)
-            val headerView = (if (tabsId != 0) decor.findViewById<View>(tabsId) else null)
-                ?: (if (titleBarId != 0) decor.findViewById<View>(titleBarId) else null)
+            val isSearch = activityName.contains("SearchActivity") ||
+                decor.findViewById<View>(activity.resources.getIdentifier("searchTopLayout", "id", activity.packageName)) != null
 
-            if (headerView != null) {
-                val bg = headerView.background
-                if (bg is android.graphics.drawable.ColorDrawable && bg.color != 0) {
-                    topColor = bg.color
+            var topColor = if (isDark) {
+                if (isSearch) android.graphics.Color.BLACK else android.graphics.Color.parseColor("#121212")
+            } else {
+                if (isSearch) android.graphics.Color.parseColor("#FFF7F7F7") else android.graphics.Color.WHITE
+            }
+
+            if (isSearch) {
+                try {
+                    val colorResName = if (isDark) "new_background_nightmode" else "new_background"
+                    val colorResId = activity.resources.getIdentifier(colorResName, "color", activity.packageName)
+                    if (colorResId != 0) {
+                        topColor = ContextCompat.getColor(activity, colorResId)
+                    }
+                } catch (ignored: Throwable) {}
+            } else {
+                val tabsId = activity.resources.getIdentifier("tabsContainer", "id", activity.packageName)
+                val titleBarId = activity.resources.getIdentifier("title_bar", "id", activity.packageName)
+                val editTitleBarId = activity.resources.getIdentifier("edit_title_bar", "id", activity.packageName)
+                val headerView = (if (tabsId != 0) decor.findViewById<View>(tabsId)?.takeIf { it.visibility == View.VISIBLE } else null)
+                    ?: (if (editTitleBarId != 0) decor.findViewById<View>(editTitleBarId)?.takeIf { it.visibility == View.VISIBLE } else null)
+                    ?: (if (titleBarId != 0) decor.findViewById<View>(titleBarId)?.takeIf { it.visibility == View.VISIBLE } else null)
+                    ?: (if (tabsId != 0) decor.findViewById<View>(tabsId) else null)
+
+                if (headerView != null) {
+                    val bg = headerView.background
+                    if (bg is android.graphics.drawable.ColorDrawable && bg.color != 0) {
+                        topColor = bg.color
+                    }
                 }
             }
+
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(topColor))
             decor.setBackgroundColor(topColor)
+            content.setBackgroundColor(topColor)
 
             WindowCompat.setDecorFitsSystemWindows(window, false)
 
@@ -422,7 +447,7 @@ object BrowserSettingsCompose {
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
             window.statusBarColor = android.graphics.Color.TRANSPARENT
-            val navBg = if (isDark) android.graphics.Color.parseColor("#121212") else android.graphics.Color.WHITE
+            val navBg = if (isDark) topColor else android.graphics.Color.WHITE
             window.navigationBarColor = navBg
 
             val controller = WindowCompat.getInsetsController(window, decor)
@@ -443,8 +468,11 @@ object BrowserSettingsCompose {
                 if (top <= 0) {
                     top = getStatusBarHeight(activity)
                 }
-                if (top > 0 && v.paddingTop != top) {
-                    v.setPadding(v.paddingLeft, top, v.paddingRight, v.paddingBottom)
+                val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+                val navBottom = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars()).bottom
+                val bottom = Math.max(imeBottom, navBottom)
+                if (top > 0 && (v.paddingTop != top || v.paddingBottom != bottom)) {
+                    v.setPadding(v.paddingLeft, top, v.paddingRight, bottom)
                 }
                 insets
             }
@@ -458,6 +486,9 @@ object BrowserSettingsCompose {
                 if (h > 0 && content.paddingTop != h) {
                     content.setPadding(content.paddingLeft, h, content.paddingRight, content.paddingBottom)
                 }
+                window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(topColor))
+                decor.setBackgroundColor(topColor)
+                content.setBackgroundColor(topColor)
             }
         } catch (ignored: Throwable) {}
     }
