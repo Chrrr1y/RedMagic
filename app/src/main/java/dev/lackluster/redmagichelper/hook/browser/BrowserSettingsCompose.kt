@@ -22,7 +22,11 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.CheckBox
 import android.widget.CompoundButton
+import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
+import android.graphics.drawable.Drawable
+import java.lang.reflect.Proxy
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -605,6 +609,77 @@ object BrowserSettingsCompose {
     }
 
     @JvmStatic
+    fun attachSkinSettings(activity: Activity, session: HookSession) {
+        var origList: View? = null
+        var origTitle: View? = null
+        try {
+            val decorView = activity.window?.decorView as? ViewGroup ?: return
+            if (bridges.containsKey(activity)) return
+
+            updateSystemBars(activity, isDarkTheme(activity))
+
+            val bridge = BrowserComposeBridge(activity)
+            bridges[activity] = bridge
+            bridge.attach(decorView)
+
+            val contentParent = activity.findViewById<ViewGroup>(android.R.id.content) ?: decorView
+            contentParent.fitsSystemWindows = false
+            contentParent.setPadding(0, 0, 0, 0)
+
+            val skinListId = activity.resources.getIdentifier(
+                "skin_list", "id", activity.packageName
+            )
+            if (skinListId != 0) {
+                origList = activity.findViewById<View>(skinListId)
+                origList?.visibility = View.GONE
+            }
+
+            val titleBarId = activity.resources.getIdentifier(
+                "title_bar", "id", activity.packageName
+            )
+            if (titleBarId != 0) {
+                origTitle = activity.findViewById<View>(titleBarId)
+                origTitle?.visibility = View.GONE
+            }
+
+            val composeView = ComposeView(activity).apply {
+                id = View.generateViewId()
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                bridge.attach(this)
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+                setContent {
+                    BrowserSettingsTheme(activity) {
+                        SkinSettingsScreen(activity, session)
+                    }
+                }
+            }
+            contentParent.addView(composeView)
+            session.log("BROWSER_COMPOSE_SKIN_ATTACHED")
+        } catch (t: Throwable) {
+            origList?.visibility = View.VISIBLE
+            origTitle?.visibility = View.VISIBLE
+            session.log("BROWSER_COMPOSE_SKIN_FAILED " + t.message)
+        }
+    }
+
+    @JvmStatic
+    fun onSkinUpdated(activity: Activity) {
+        refreshNotifiers[activity]?.invoke()
+    }
+
+    @JvmStatic
+    fun onSkinListChanged() {
+        for (notifier in refreshNotifiers.values) {
+            try {
+                notifier.invoke()
+            } catch (ignored: Throwable) {}
+        }
+    }
+
+    @JvmStatic
     fun onResume(owner: Any?) {
         if (owner is Activity) {
             updateSystemBars(owner, isDarkTheme(owner))
@@ -1136,7 +1211,7 @@ object BrowserSettingsCompose {
                         containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
                         titleContentColor = if (isDark) TextPrimaryDark else TextPrimaryLight
                     ),
-                    windowInsets = WindowInsets(0, 0, 0, 0)
+                    windowInsets = WindowInsets.statusBars
                 )
             },
             containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
@@ -1146,7 +1221,7 @@ object BrowserSettingsCompose {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
-                contentPadding = PaddingValues(vertical = 8.dp)
+                contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 2.dp, bottom = 16.dp)
             ) {
                 // User Center Profile Header Card
                 item(key = "user_center") {
@@ -1373,7 +1448,7 @@ object BrowserSettingsCompose {
                         containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
                         titleContentColor = if (isDark) TextPrimaryDark else TextPrimaryLight
                     ),
-                    windowInsets = WindowInsets(0, 0, 0, 0)
+                    windowInsets = WindowInsets.statusBars
                 )
             },
             containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
@@ -1383,7 +1458,7 @@ object BrowserSettingsCompose {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
-                contentPadding = PaddingValues(vertical = 8.dp)
+                contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 2.dp, bottom = 16.dp)
             ) {
                 // Check if specific layout is recognized
                 when {
@@ -3152,7 +3227,7 @@ object BrowserSettingsCompose {
                         containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
                         titleContentColor = if (isDark) TextPrimaryDark else TextPrimaryLight
                     ),
-                    windowInsets = WindowInsets(0, 0, 0, 0)
+                    windowInsets = WindowInsets.statusBars
                 )
             },
             containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
@@ -3162,7 +3237,7 @@ object BrowserSettingsCompose {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
-                contentPadding = PaddingValues(vertical = 8.dp)
+                contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 2.dp, bottom = 16.dp)
             ) {
                 // Account Card
                 item {
@@ -3275,6 +3350,414 @@ object BrowserSettingsCompose {
 
                 item {
                     Spacer(Modifier.height(32.dp))
+                }
+            }
+        }
+    }
+
+    data class SkinCardItem(
+        val id: Int,
+        val name: String,
+        val serverId: String,
+        val isApplied: Boolean,
+        val rawBean: Any
+    )
+
+    private fun getSkinList(activity: Activity): List<Any> {
+        // 1. Try reading activity.r
+        try {
+            val rField = activity.javaClass.getDeclaredField("r")
+            rField.isAccessible = true
+            val list = rField.get(activity) as? List<*>
+            if (list != null && list.isNotEmpty()) {
+                return list.filterNotNull()
+            }
+        } catch (ignored: Throwable) {}
+
+        // 2. Try SkinManager.k().n()
+        try {
+            val smClz = activity.classLoader.loadClass("com.android.browser.skin.SkinManager")
+            val kMethod = smClz.getMethod("k")
+            val sm = kMethod.invoke(null)
+            val nMethod = smClz.getMethod("n")
+            val list = nMethod.invoke(sm) as? List<*>
+            if (list != null && list.isNotEmpty()) {
+                return list.filterNotNull()
+            }
+        } catch (ignored: Throwable) {}
+
+        return emptyList()
+    }
+
+    private fun isSkinApplied(activity: Activity, bean: Any): Boolean {
+        return try {
+            val smClz = activity.classLoader.loadClass("com.android.browser.skin.SkinManager")
+            val vMethod = smClz.getMethod("v", bean.javaClass)
+            vMethod.invoke(null, bean) as? Boolean ?: false
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    private fun getCurrentSkinServerId(activity: Activity): String? {
+        return try {
+            val smClz = activity.classLoader.loadClass("com.android.browser.skin.SkinManager")
+            val sm = smClz.getMethod("k").invoke(null)
+            val curBean = smClz.getMethod("r").invoke(sm)
+            if (curBean != null) {
+                val serverIdMethod = curBean.javaClass.getMethod("getServerId")
+                serverIdMethod.invoke(curBean) as? String
+            } else null
+        } catch (t: Throwable) {
+            null
+        }
+    }
+
+    private fun extractSkinItems(activity: Activity): List<SkinCardItem> {
+        val rawList = getSkinList(activity)
+        val result = ArrayList<SkinCardItem>()
+        val seenServerIds = HashSet<String>()
+        val currentServerId = getCurrentSkinServerId(activity)
+
+        for (bean in rawList) {
+            try {
+                val nameMethod = bean.javaClass.getMethod("getName")
+                val name = (nameMethod.invoke(bean) as? String)?.takeIf { it.isNotBlank() } ?: "主题皮肤"
+
+                val idMethod = bean.javaClass.getMethod("getId")
+                val id = idMethod.invoke(bean) as? Int ?: 0
+
+                val serverIdMethod = bean.javaClass.getMethod("getServerId")
+                val serverId = (serverIdMethod.invoke(bean) as? String) ?: id.toString()
+
+                if (seenServerIds.contains(serverId)) continue
+                seenServerIds.add(serverId)
+
+                val isApplied = (currentServerId != null && currentServerId == serverId) || isSkinApplied(activity, bean)
+                result.add(SkinCardItem(id, name, serverId, isApplied, bean))
+            } catch (t: Throwable) {}
+        }
+        return result
+    }
+
+    private fun previewSkin(activity: Activity, bean: Any) {
+        try {
+            val iMethod = activity.javaClass.getMethod("i", bean.javaClass)
+            iMethod.invoke(activity, bean)
+        } catch (t: Throwable) {
+            try {
+                val smClz = activity.classLoader.loadClass("com.android.browser.skin.SkinManager")
+                val sm = smClz.getMethod("k").invoke(null)
+                smClz.getMethod("A", bean.javaClass).invoke(sm, bean)
+                smClz.getMethod("B", Boolean::class.javaPrimitiveType).invoke(sm, true)
+                val previewClz = activity.classLoader.loadClass("com.android.browser.skin.SkinPreviewActivity")
+                val intent = Intent(activity, previewClz)
+                activity.startActivityForResult(intent, 100)
+            } catch (ignored: Throwable) {}
+        }
+    }
+
+    private fun applySkin(activity: Activity, bean: Any, onComplete: (Boolean) -> Unit) {
+        try {
+            val smClz = activity.classLoader.loadClass("com.android.browser.skin.SkinManager")
+            val sm = smClz.getMethod("k").invoke(null)
+            val callbackClz = activity.classLoader.loadClass("com.android.browser.skin.SkinManager\$ISkinApplyCallback")
+            val proxy = Proxy.newProxyInstance(
+                activity.classLoader,
+                arrayOf(callbackClz)
+            ) { _, method, args ->
+                if (method.name == "a") {
+                    val success = args?.get(0) as? Boolean ?: false
+                    activity.runOnUiThread {
+                        if (success) {
+                            try {
+                                activity.javaClass.getMethod("M").invoke(activity)
+                            } catch (ignored: Throwable) {}
+                        }
+                        onComplete(success)
+                    }
+                }
+                null
+            }
+            val eMethod = smClz.getMethod("e", bean.javaClass, callbackClz)
+            eMethod.invoke(sm, bean, proxy)
+        } catch (t: Throwable) {
+            activity.runOnUiThread {
+                onComplete(false)
+            }
+        }
+    }
+
+    @Composable
+    private fun SkinThumbnail(
+        activity: Activity,
+        bean: Any,
+        modifier: Modifier = Modifier
+    ) {
+        AndroidView(
+            modifier = modifier,
+            factory = { ctx ->
+                ImageView(ctx).apply {
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    adjustViewBounds = true
+                }
+            },
+            update = { imageView ->
+                try {
+                    val smClz = activity.classLoader.loadClass("com.android.browser.skin.SkinManager")
+                    val sm = smClz.getMethod("k").invoke(null)
+                    val fMethod = smClz.getMethod("f", ImageView::class.java, bean.javaClass)
+                    fMethod.invoke(sm, imageView, bean)
+                } catch (t: Throwable) {
+                    try {
+                        val dMethod = bean.javaClass.getMethod("getImgDrawable")
+                        val drawable = dMethod.invoke(bean) as? Drawable
+                        if (drawable != null) {
+                            imageView.setImageDrawable(drawable)
+                        }
+                    } catch (ignored: Throwable) {}
+                }
+            }
+        )
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun SkinSettingsScreen(activity: Activity, session: HookSession) {
+        var refreshRevision by remember { mutableIntStateOf(0) }
+        var applyingId by remember { mutableStateOf<String?>(null) }
+        val isDark = remember(refreshRevision) { isDarkTheme(activity) }
+
+        remember(activity) {
+            refreshNotifiers[activity] = {
+                refreshRevision++
+            }
+            true
+        }
+
+        LaunchedEffect(Unit) {
+            delay(200)
+            refreshRevision++
+            delay(600)
+            refreshRevision++
+            delay(1200)
+            refreshRevision++
+        }
+
+        val skinItems = remember(refreshRevision) {
+            extractSkinItems(activity)
+        }
+
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = "个性皮肤",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) TextPrimaryDark else TextPrimaryLight
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(
+                            onClick = { activity.finish() },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            BackArrowIcon(tint = if (isDark) TextPrimaryDark else TextPrimaryLight)
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
+                        titleContentColor = if (isDark) TextPrimaryDark else TextPrimaryLight
+                    ),
+                    windowInsets = WindowInsets.statusBars
+                )
+            },
+            containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
+            contentWindowInsets = WindowInsets.navigationBars
+        ) { paddingValues ->
+            if (skinItems.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "正在加载皮肤列表...",
+                        fontSize = 14.sp,
+                        color = if (isDark) TextSecondaryDark else TextSecondaryLight
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 24.dp)
+                ) {
+                    items(
+                        count = skinItems.size,
+                        key = { index -> skinItems[index].serverId.ifEmpty { index.toString() } }
+                    ) { index ->
+                        val item = skinItems[index]
+                        SkinCard(
+                            activity = activity,
+                            item = item,
+                            isDark = isDark,
+                            isApplying = applyingId == item.serverId,
+                            onPreview = { previewSkin(activity, item.rawBean) },
+                            onApply = {
+                                applyingId = item.serverId
+                                applySkin(activity, item.rawBean) { success ->
+                                    applyingId = null
+                                    if (success) {
+                                        Toast.makeText(activity, "皮肤应用成功", Toast.LENGTH_SHORT).show()
+                                        refreshRevision++
+                                    } else {
+                                        Toast.makeText(activity, "皮肤应用失败", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun SkinCard(
+        activity: Activity,
+        item: SkinCardItem,
+        isDark: Boolean,
+        isApplying: Boolean,
+        onPreview: () -> Unit,
+        onApply: () -> Unit
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 6.dp),
+            shape = RoundedCornerShape(18.dp),
+            color = if (isDark) CardBgDark else CardBgLight,
+            tonalElevation = 0.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                // Header: Name + Badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = item.name,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isDark) TextPrimaryDark else TextPrimaryLight
+                    )
+                    if (item.isApplied) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = NubiaRed.copy(alpha = 0.12f)
+                        ) {
+                            Text(
+                                text = "当前使用",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = NubiaRed,
+                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // Thumbnail Image: Click to preview
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(onClick = onPreview)
+                ) {
+                    SkinThumbnail(
+                        activity = activity,
+                        bean = item.rawBean,
+                        modifier = Modifier.fillMaxSize()
+                    )
+
+                    // Preview hint pill
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(8.dp),
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.Black.copy(alpha = 0.5f)
+                    ) {
+                        Text(
+                            text = "点击预览",
+                            fontSize = 11.sp,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                // Button: "✓ 使用中" or "立即使用"
+                if (item.isApplied) {
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp),
+                        shape = RoundedCornerShape(21.dp),
+                        color = if (isDark) Color(0xFF2C2C2E) else Color(0xFFE5E5EA)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "✓ 使用中",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (isDark) Color(0xFF8E8E93) else Color(0xFF8A8A8E)
+                            )
+                        }
+                    }
+                } else {
+                    Button(
+                        onClick = onApply,
+                        enabled = !isApplying,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp),
+                        shape = RoundedCornerShape(21.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = NubiaRed,
+                            contentColor = Color.White,
+                            disabledContainerColor = NubiaRed.copy(alpha = 0.5f)
+                        )
+                    ) {
+                        if (isApplying) {
+                            Text(
+                                text = "应用中...",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        } else {
+                            Text(
+                                text = "立即使用",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 }
             }
         }

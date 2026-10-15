@@ -861,11 +861,10 @@ public final class BrowserAdapter implements HostAdapter {
     }
 
     private static boolean isSubSettingsActivity(String name) {
-        if (name == null || name.endsWith("BrowserSettingActivity")) {
+        if (name == null || name.endsWith("BrowserSettingActivity") || name.contains("SkinActivity")) {
             return false;
         }
         return name.startsWith("com.android.browser.settings.")
-                || name.startsWith("com.android.browser.skin.")
                 || name.contains("ServiceSettingActivity")
                 || name.contains("SettingActivity");
     }
@@ -913,6 +912,7 @@ public final class BrowserAdapter implements HostAdapter {
                     Activity act = (Activity) actObj;
                     String name = act.getClass().getName();
                     if (name.contains("BrowserSettingActivity") ||
+                            name.contains("SkinActivity") ||
                             (name.contains("Setting") && !dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isNativeAdapted(act))) {
                         dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.updateSystemBars(
                                 act, dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isDarkTheme(act));
@@ -1050,6 +1050,7 @@ public final class BrowserAdapter implements HostAdapter {
                         if (ctx instanceof Activity) {
                             String name = ctx.getClass().getName();
                             if (name.contains("BrowserSettingActivity") ||
+                                    name.contains("SkinActivity") ||
                                     (name.contains("Setting") && !dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isNativeAdapted((Activity) ctx))) {
                                 return chain.getArg(2);
                             }
@@ -1642,43 +1643,84 @@ public final class BrowserAdapter implements HostAdapter {
         if (skinActivity == null) {
             return;
         }
-        session.hook(skinActivity, "onCreate", chain -> {
-            Object result = chain.proceed();
-            Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
-                Activity act = (Activity) owner;
-                act.getWindow().getDecorView().post(() -> {
-                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+
+        if (session.config().browserComposeSettings()) {
+            session.hook(skinActivity, "onCreate", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity) {
+                    Activity act = (Activity) owner;
+                    act.getWindow().getDecorView().post(() -> {
+                        if (!act.isFinishing() && !act.isDestroyed()) {
+                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.attachSkinSettings(act, session);
+                        }
+                    });
+                }
+                return result;
+            }, Bundle.class);
+
+            session.hook(skinActivity, "onResume", chain -> {
+                Object result = chain.proceed();
+                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onResume(chain.getThisObject());
+                return result;
+            });
+
+            session.hook(skinActivity, "onPause", chain -> {
+                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onPause(chain.getThisObject());
+                return chain.proceed();
+            });
+
+            session.hook(skinActivity, "onDestroy", chain -> {
+                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onDestroy(chain.getThisObject());
+                return chain.proceed();
+            });
+
+            session.hook(skinActivity, "M", chain -> {
+                Object res = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity) {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onSkinUpdated((Activity) owner);
+                }
+                return res;
+            });
+
+            Class<?> adapterClz = session.findOptionalClass("com.android.browser.skin.SkinListAdapter");
+            if (adapterClz != null) {
+                session.hook(adapterClz, "notifyDataSetChanged", chain -> {
+                    Object res = chain.proceed();
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onSkinListChanged();
+                    return res;
                 });
             }
-            return result;
-        }, Bundle.class);
 
-        session.hook(skinActivity, "setContentView", chain -> {
-            Object result = chain.proceed();
-            Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
-                Activity act = (Activity) owner;
-                act.getWindow().getDecorView().post(() -> {
-                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
-                });
-            }
-            return result;
-        }, int.class);
+            session.log("BROWSER_SKIN_COMPOSE_HOOK_INSTALLED");
+        } else {
+            session.hook(skinActivity, "onCreate", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity) {
+                    Activity act = (Activity) owner;
+                    act.getWindow().getDecorView().post(() -> {
+                        dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                    });
+                }
+                return result;
+            }, Bundle.class);
 
-        session.hook(skinActivity, "onResume", chain -> {
-            Object result = chain.proceed();
-            Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
-                Activity act = (Activity) owner;
-                act.getWindow().getDecorView().post(() -> {
-                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
-                });
-            }
-            return result;
-        });
+            session.hook(skinActivity, "onResume", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity) {
+                    Activity act = (Activity) owner;
+                    act.getWindow().getDecorView().post(() -> {
+                        dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                    });
+                }
+                return result;
+            });
 
-        session.log("BROWSER_SKIN_STATUS_BAR_ADAPTIVE_HOOKED");
+            session.log("BROWSER_SKIN_STATUS_BAR_ADAPTIVE_HOOKED");
+        }
     }
 
     private static int getStatusBarHeight(Context context) {
