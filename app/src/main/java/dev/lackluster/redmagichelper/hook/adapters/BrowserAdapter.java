@@ -232,6 +232,7 @@ public final class BrowserAdapter implements HostAdapter {
         installAdaptiveNavigationButtons(session);
         installSearchActivityStatusBarAdaptive(session);
         installComboViewStatusBarAdaptive(session);
+        installSkinActivityStatusBarAdaptive(session);
         session.log("BROWSER_CAPABILITY_SCAN_COMPLETE");
     }
 
@@ -1023,24 +1024,6 @@ public final class BrowserAdapter implements HostAdapter {
             });
         }
 
-        Class<?> skinActivity = session.findOptionalClass("com.android.browser.skin.SkinActivity");
-        if (skinActivity != null) {
-            session.hook(skinActivity, "onCreate", chain -> {
-                Object res = chain.proceed();
-                Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
-                    Activity act = (Activity) owner;
-                    act.getWindow().getDecorView().post(() -> {
-                        if (!act.isFinishing() && !act.isDestroyed()) {
-                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.attachSubSettings(
-                                    act, session);
-                        }
-                    });
-                }
-                return res;
-            }, Bundle.class);
-        }
-
         // Transform UserCenterActivity (ZTE Account / Mine page) into system Compose UI
         Class<?> userCenterAct = session.findOptionalClass("cn.nubia.usercenter.UserCenterActivity");
         if (userCenterAct != null) {
@@ -1571,54 +1554,7 @@ public final class BrowserAdapter implements HostAdapter {
     }
 
     private static void applySearchStatusBarInsets(Activity activity) {
-        try {
-            Window window = activity.getWindow();
-            if (window == null) return;
-            View decor = window.getDecorView();
-            int topLayoutId = activity.getResources().getIdentifier(
-                    "searchTopLayout", "id", activity.getPackageName());
-            View searchTop = topLayoutId != 0 ? decor.findViewById(topLayoutId) : null;
-            if (searchTop == null) {
-                searchTop = decor.findViewById(android.R.id.content);
-            }
-            if (searchTop != null) {
-                final View targetView = searchTop;
-                Runnable applyInsetsAction = () -> {
-                    int statusBarHeight = getStatusBarHeight(activity);
-                    if (statusBarHeight > 0 && targetView.getPaddingTop() != statusBarHeight) {
-                        targetView.setPadding(
-                                targetView.getPaddingLeft(),
-                                statusBarHeight,
-                                targetView.getPaddingRight(),
-                                targetView.getPaddingBottom()
-                        );
-                    }
-                };
-                applyInsetsAction.run();
-                targetView.post(applyInsetsAction);
-
-                decor.setOnApplyWindowInsetsListener((v, insets) -> {
-                    int top = 0;
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        android.graphics.Insets barInsets = insets.getInsetsIgnoringVisibility(
-                                WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout());
-                        top = barInsets.top;
-                    }
-                    if (top <= 0) {
-                        top = insets.getSystemWindowInsetTop();
-                    }
-                    if (top <= 0) {
-                        top = getStatusBarHeight(activity);
-                    }
-                    if (top > 0 && targetView.getPaddingTop() != top) {
-                        targetView.setPadding(targetView.getPaddingLeft(), top, targetView.getPaddingRight(), targetView.getPaddingBottom());
-                    }
-                    return v.onApplyWindowInsets(insets);
-                });
-                decor.requestApplyInsets();
-            }
-        } catch (Throwable ignored) {
-        }
+        dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(activity);
     }
 
     private static void installComboViewStatusBarAdaptive(HookSession session) {
@@ -1630,16 +1566,34 @@ public final class BrowserAdapter implements HostAdapter {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
             if (owner instanceof Activity) {
-                applyComboViewStatusBarInsets((Activity) owner);
+                Activity act = (Activity) owner;
+                act.getWindow().getDecorView().post(() -> {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                });
             }
             return result;
         }, Bundle.class);
+
+        session.hook(comboActivity, "setContentView", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                Activity act = (Activity) owner;
+                act.getWindow().getDecorView().post(() -> {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                });
+            }
+            return result;
+        }, int.class);
 
         session.hook(comboActivity, "onResume", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
             if (owner instanceof Activity) {
-                applyComboViewStatusBarInsets((Activity) owner);
+                Activity act = (Activity) owner;
+                act.getWindow().getDecorView().post(() -> {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                });
             }
             return result;
         });
@@ -1647,72 +1601,48 @@ public final class BrowserAdapter implements HostAdapter {
         session.log("BROWSER_COMBO_STATUS_BAR_ADAPTIVE_HOOKED");
     }
 
-    private static void applyComboViewStatusBarInsets(Activity activity) {
-        try {
-            Window window = activity.getWindow();
-            if (window == null) {
-                return;
-            }
-            View decor = window.getDecorView();
-            View content = decor.findViewById(android.R.id.content);
-            if (content == null) {
-                content = decor;
-            }
-            final View targetView = content;
-
-            Runnable applyInsetsAction = () -> {
-                int statusBarHeight = getStatusBarHeight(activity);
-                if (statusBarHeight > 0 && targetView.getPaddingTop() != statusBarHeight) {
-                    targetView.setPadding(
-                            targetView.getPaddingLeft(),
-                            statusBarHeight,
-                            targetView.getPaddingRight(),
-                            targetView.getPaddingBottom()
-                    );
-                }
-            };
-
-            applyInsetsAction.run();
-            targetView.post(applyInsetsAction);
-
-            decor.setOnApplyWindowInsetsListener((v, insets) -> {
-                int top = 0;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    android.graphics.Insets barInsets = insets.getInsetsIgnoringVisibility(
-                            WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout());
-                    top = barInsets.top;
-                }
-                if (top <= 0) {
-                    top = insets.getSystemWindowInsetTop();
-                }
-                if (top <= 0) {
-                    top = getStatusBarHeight(activity);
-                }
-                if (top > 0 && targetView.getPaddingTop() != top) {
-                    targetView.setPadding(targetView.getPaddingLeft(), top, targetView.getPaddingRight(), targetView.getPaddingBottom());
-                }
-                return v.onApplyWindowInsets(insets);
-            });
-            decor.requestApplyInsets();
-
-            try {
-                window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-                window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
-                window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
-                int uiMode = activity.getResources().getConfiguration().uiMode;
-                boolean isDark = (uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
-                        == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-                int bgColor = isDark ? 0xFF121212 : 0xFFFFFFFF;
-                window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(bgColor));
-                decor.setBackgroundColor(bgColor);
-                androidx.core.view.WindowInsetsControllerCompat controller =
-                        androidx.core.view.WindowCompat.getInsetsController(window, decor);
-                if (controller != null) {
-                    controller.setAppearanceLightStatusBars(!isDark);
-                }
-            } catch (Throwable ignored) {}
-        } catch (Throwable ignored) {
+    private static void installSkinActivityStatusBarAdaptive(HookSession session) {
+        Class<?> skinActivity = session.findOptionalClass("com.android.browser.skin.SkinActivity");
+        if (skinActivity == null) {
+            return;
         }
+        session.hook(skinActivity, "onCreate", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                Activity act = (Activity) owner;
+                act.getWindow().getDecorView().post(() -> {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                });
+            }
+            return result;
+        }, Bundle.class);
+
+        session.hook(skinActivity, "setContentView", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                Activity act = (Activity) owner;
+                act.getWindow().getDecorView().post(() -> {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                });
+            }
+            return result;
+        }, int.class);
+
+        session.hook(skinActivity, "onResume", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                Activity act = (Activity) owner;
+                act.getWindow().getDecorView().post(() -> {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                });
+            }
+            return result;
+        });
+
+        session.log("BROWSER_SKIN_STATUS_BAR_ADAPTIVE_HOOKED");
     }
 
     private static int getStatusBarHeight(Context context) {

@@ -25,6 +25,7 @@ import android.widget.CompoundButton
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import android.content.Intent
 import android.net.Uri
 import android.content.res.Resources
@@ -377,51 +378,25 @@ object BrowserSettingsCompose {
         try {
             val window = activity.window ?: return
             val decor = window.decorView
-            val content = decor.findViewById<View>(android.R.id.content) ?: decor
+            val content = decor.findViewById<ViewGroup>(android.R.id.content) ?: decor as? ViewGroup ?: return
             val isDark = isDarkTheme(activity)
 
             var topColor = if (isDark) android.graphics.Color.parseColor("#121212") else android.graphics.Color.WHITE
+            val tabsId = activity.resources.getIdentifier("tabsContainer", "id", activity.packageName)
             val titleBarId = activity.resources.getIdentifier("title_bar", "id", activity.packageName)
-            if (titleBarId != 0) {
-                val tb = decor.findViewById<View>(titleBarId)
-                val bg = tb?.background
-                if (bg is android.graphics.drawable.ColorDrawable) {
+            val headerView = (if (tabsId != 0) decor.findViewById<View>(tabsId) else null)
+                ?: (if (titleBarId != 0) decor.findViewById<View>(titleBarId) else null)
+
+            if (headerView != null) {
+                val bg = headerView.background
+                if (bg is android.graphics.drawable.ColorDrawable && bg.color != 0) {
                     topColor = bg.color
                 }
             }
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(topColor))
             decor.setBackgroundColor(topColor)
 
-            val applyInsets = {
-                val statusBarHeight = getStatusBarHeight(activity)
-                if (statusBarHeight > 0 && content.paddingTop != statusBarHeight) {
-                    content.setPadding(content.paddingLeft, statusBarHeight, content.paddingRight, content.paddingBottom)
-                }
-            }
-
-            applyInsets()
-            content.post(applyInsets)
-
-            decor.setOnApplyWindowInsetsListener { v, insets ->
-                var top = 0
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    val barInsets = insets.getInsetsIgnoringVisibility(
-                        android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.displayCutout()
-                    )
-                    top = barInsets.top
-                }
-                if (top <= 0) {
-                    top = insets.systemWindowInsetTop
-                }
-                if (top <= 0) {
-                    top = getStatusBarHeight(activity)
-                }
-                if (top > 0 && content.paddingTop != top) {
-                    content.setPadding(content.paddingLeft, top, content.paddingRight, content.paddingBottom)
-                }
-                v.onApplyWindowInsets(insets)
-            }
-            decor.requestApplyInsets()
+            WindowCompat.setDecorFitsSystemWindows(window, false)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 window.isStatusBarContrastEnforced = false
@@ -438,6 +413,37 @@ object BrowserSettingsCompose {
             val controller = WindowCompat.getInsetsController(window, decor)
             controller.isAppearanceLightStatusBars = !isDark
             controller.isAppearanceLightNavigationBars = !isDark
+
+            val statusBarHeight = getStatusBarHeight(activity)
+
+            content.fitsSystemWindows = false
+            if (statusBarHeight > 0) {
+                content.setPadding(content.paddingLeft, statusBarHeight, content.paddingRight, content.paddingBottom)
+            }
+
+            ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+                var top = insets.getInsetsIgnoringVisibility(
+                    WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
+                ).top
+                if (top <= 0) {
+                    top = getStatusBarHeight(activity)
+                }
+                if (top > 0 && v.paddingTop != top) {
+                    v.setPadding(v.paddingLeft, top, v.paddingRight, v.paddingBottom)
+                }
+                insets
+            }
+
+            ViewCompat.setOnApplyWindowInsetsListener(decor) { _, insets ->
+                insets
+            }
+
+            content.post {
+                val h = getStatusBarHeight(activity)
+                if (h > 0 && content.paddingTop != h) {
+                    content.setPadding(content.paddingLeft, h, content.paddingRight, content.paddingBottom)
+                }
+            }
         } catch (ignored: Throwable) {}
     }
 
