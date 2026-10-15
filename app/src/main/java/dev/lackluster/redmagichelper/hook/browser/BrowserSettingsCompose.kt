@@ -315,6 +315,7 @@ object BrowserSettingsCompose {
 
     @JvmStatic
     fun attach(activity: Activity, session: HookSession) {
+        var origMain: View? = null
         try {
             val decorView = activity.window?.decorView as? ViewGroup ?: return
             if (bridges.containsKey(activity)) return
@@ -327,16 +328,11 @@ object BrowserSettingsCompose {
 
             val contentParent = activity.findViewById<ViewGroup>(android.R.id.content) ?: decorView
 
-            // Hide original linear layout to prevent duplicate rendering, while
-            // keeping it in the view hierarchy so findViewById in onResume won't NPE.
             val origMainId = activity.resources.getIdentifier(
                 "setting_main_layout", "id", activity.packageName
             )
             if (origMainId != 0) {
-                val origMain = activity.findViewById<View>(origMainId)
-                if (origMain != null) {
-                    origMain.visibility = View.GONE
-                }
+                origMain = activity.findViewById<View>(origMainId)
             }
 
             val composeView = ComposeView(activity).apply {
@@ -354,25 +350,36 @@ object BrowserSettingsCompose {
                 }
             }
             contentParent.addView(composeView)
+            origMain?.visibility = View.GONE
             session.log("BROWSER_COMPOSE_SETTINGS_ATTACHED")
         } catch (t: Throwable) {
+            origMain?.visibility = View.VISIBLE
             session.log("BROWSER_COMPOSE_SETTINGS_FAILED " + t.message)
         }
     }
 
     @JvmStatic
     fun attachSubSettings(activity: Activity, session: HookSession) {
+        var origMain: View? = null
         try {
             val decorView = activity.window?.decorView as? ViewGroup ?: return
             if (bridges.containsKey(activity)) return
 
-            updateSystemBars(activity, isDarkTheme(activity))
-
             val contentParent = activity.findViewById<ViewGroup>(android.R.id.content) ?: decorView
-            val origMain = contentParent.getChildAt(0) ?: return
+            origMain = contentParent.getChildAt(0) ?: return
 
-            // Keep original layout in hierarchy for listeners and findViewById, but make INVISIBLE
-            origMain.visibility = View.INVISIBLE
+            val activityName = activity.javaClass.simpleName
+            val isDedicated = activityName == "SettingAboutActivity" ||
+                    activityName == "SettingClearDataActivity" ||
+                    activityName == "SettingTextSizeActivity"
+
+            // If it's a generic settings activity and we cannot inspect any rows,
+            // keep the original native view visible and do not hijack.
+            if (!isDedicated && inspectViewTree(origMain).isEmpty()) {
+                return
+            }
+
+            updateSystemBars(activity, isDarkTheme(activity))
 
             val bridge = BrowserComposeBridge(activity)
             bridges[activity] = bridge
@@ -392,9 +399,12 @@ object BrowserSettingsCompose {
                     }
                 }
             }
+
+            origMain.visibility = View.INVISIBLE
             contentParent.addView(composeView)
             session.log("BROWSER_COMPOSE_SUB_SETTINGS_ATTACHED for " + activity.javaClass.simpleName)
         } catch (t: Throwable) {
+            origMain?.visibility = View.VISIBLE
             session.log("BROWSER_COMPOSE_SUB_SETTINGS_FAILED " + t.message)
         }
     }

@@ -46,7 +46,7 @@ public final class ModuleConfig {
                 || getBoolean("browser_remove_search_shortcuts", false)
                 || getBoolean("browser_remove_download_hot", false)
                 || getBoolean("browser_remove_download_recommend", false)
-                || getBoolean("browser_compose_settings", true)
+                || getBoolean("browser_compose_settings", false)
                 || getBoolean("browser_hide_switch_model", true)
                 || getBoolean("browser_disable_telemetry", false);
     }
@@ -92,7 +92,7 @@ public final class ModuleConfig {
     }
 
     public boolean browserComposeSettings() {
-        return getBoolean("browser_compose_settings", true);
+        return getBoolean("browser_compose_settings", false);
     }
 
     public boolean browserHideSwitchModel() {

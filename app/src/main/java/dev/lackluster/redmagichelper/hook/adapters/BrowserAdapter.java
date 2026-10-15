@@ -20,7 +20,9 @@ import android.content.ContextWrapper;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowManager;
 
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Field;
@@ -229,6 +231,7 @@ public final class BrowserAdapter implements HostAdapter {
         installBasicModelFullServiceBypass(session);
         installAdaptiveNavigationButtons(session);
         installSearchActivityStatusBarAdaptive(session);
+        installComboViewStatusBarAdaptive(session);
         session.log("BROWSER_CAPABILITY_SCAN_COMPLETE");
     }
 
@@ -857,22 +860,6 @@ public final class BrowserAdapter implements HostAdapter {
     }
 
     private static void installBrowserSettingsCompose(HookSession session) {
-        Class<?> androidUtil = session.findOptionalClass("com.android.browser.util.AndroidUtil");
-        if (androidUtil != null) {
-            session.hook(androidUtil, "r", chain -> {
-                Object act = chain.getArg(0);
-                if (act instanceof Activity) {
-                    String name = act.getClass().getName();
-                    if (name.startsWith("com.android.browser.settings.")
-                            || name.contains("ServiceSettingActivity")
-                            || name.contains("UserCenterActivity")) {
-                        return null;
-                    }
-                }
-                return chain.proceed();
-            }, Activity.class, boolean.class);
-        }
-
         Class<?> settings = session.findOptionalClass(
                 "com.android.browser.settings.BrowserSettingActivity");
         if (settings != null) {
@@ -1564,6 +1551,91 @@ public final class BrowserAdapter implements HostAdapter {
                 });
                 targetView.requestApplyInsets();
             }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void installComboViewStatusBarAdaptive(HookSession session) {
+        Class<?> comboActivity = session.findOptionalClass("com.android.browser.ComboViewActivity");
+        if (comboActivity == null) {
+            return;
+        }
+        session.hook(comboActivity, "onCreate", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                applyComboViewStatusBarInsets((Activity) owner);
+            }
+            return result;
+        }, Bundle.class);
+
+        session.hook(comboActivity, "onResume", chain -> {
+            Object result = chain.proceed();
+            Object owner = chain.getThisObject();
+            if (owner instanceof Activity) {
+                applyComboViewStatusBarInsets((Activity) owner);
+            }
+            return result;
+        });
+
+        session.log("BROWSER_COMBO_STATUS_BAR_ADAPTIVE_HOOKED");
+    }
+
+    private static void applyComboViewStatusBarInsets(Activity activity) {
+        try {
+            int statusBarHeight = getStatusBarHeight(activity);
+            Window window = activity.getWindow();
+            if (window == null) {
+                return;
+            }
+            View decor = window.getDecorView();
+            View content = decor.findViewById(android.R.id.content);
+            if (content == null) {
+                content = decor;
+            }
+            final View targetView = content;
+            final int initialTop = statusBarHeight;
+            if (initialTop > 0 && targetView.getPaddingTop() < initialTop) {
+                targetView.setPadding(
+                        targetView.getPaddingLeft(),
+                        initialTop,
+                        targetView.getPaddingRight(),
+                        targetView.getPaddingBottom()
+                );
+            }
+            targetView.setOnApplyWindowInsetsListener((v, insets) -> {
+                int top = 0;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    android.graphics.Insets barInsets = insets.getInsetsIgnoringVisibility(
+                            WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout());
+                    top = barInsets.top;
+                }
+                if (top <= 0) {
+                    top = insets.getSystemWindowInsetTop();
+                }
+                if (top <= 0) {
+                    top = initialTop;
+                }
+                if (top > 0 && v.getPaddingTop() != top) {
+                    v.setPadding(v.getPaddingLeft(), top, v.getPaddingRight(), v.getPaddingBottom());
+                }
+                return insets;
+            });
+            targetView.requestApplyInsets();
+
+            try {
+                window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
+                window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+                window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+                androidx.core.view.WindowInsetsControllerCompat controller =
+                        androidx.core.view.WindowCompat.getInsetsController(window, decor);
+                if (controller != null) {
+                    int uiMode = activity.getResources().getConfiguration().uiMode;
+                    boolean isDark = (uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                    controller.setAppearanceLightStatusBars(!isDark);
+                }
+            } catch (Throwable ignored) {}
         } catch (Throwable ignored) {
         }
     }
