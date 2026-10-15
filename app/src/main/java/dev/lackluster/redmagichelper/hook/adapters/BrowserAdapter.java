@@ -1512,8 +1512,9 @@ public final class BrowserAdapter implements HostAdapter {
 
     private static void applySearchStatusBarInsets(Activity activity) {
         try {
-            int statusBarHeight = getStatusBarHeight(activity);
-            View decor = activity.getWindow().getDecorView();
+            Window window = activity.getWindow();
+            if (window == null) return;
+            View decor = window.getDecorView();
             int topLayoutId = activity.getResources().getIdentifier(
                     "searchTopLayout", "id", activity.getPackageName());
             View searchTop = topLayoutId != 0 ? decor.findViewById(topLayoutId) : null;
@@ -1522,16 +1523,21 @@ public final class BrowserAdapter implements HostAdapter {
             }
             if (searchTop != null) {
                 final View targetView = searchTop;
-                final int initialTop = statusBarHeight;
-                if (initialTop > 0 && targetView.getPaddingTop() < initialTop) {
-                    targetView.setPadding(
-                            targetView.getPaddingLeft(),
-                            initialTop,
-                            targetView.getPaddingRight(),
-                            targetView.getPaddingBottom()
-                    );
-                }
-                targetView.setOnApplyWindowInsetsListener((v, insets) -> {
+                Runnable applyInsetsAction = () -> {
+                    int statusBarHeight = getStatusBarHeight(activity);
+                    if (statusBarHeight > 0 && targetView.getPaddingTop() != statusBarHeight) {
+                        targetView.setPadding(
+                                targetView.getPaddingLeft(),
+                                statusBarHeight,
+                                targetView.getPaddingRight(),
+                                targetView.getPaddingBottom()
+                        );
+                    }
+                };
+                applyInsetsAction.run();
+                targetView.post(applyInsetsAction);
+
+                decor.setOnApplyWindowInsetsListener((v, insets) -> {
                     int top = 0;
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         android.graphics.Insets barInsets = insets.getInsetsIgnoringVisibility(
@@ -1542,14 +1548,14 @@ public final class BrowserAdapter implements HostAdapter {
                         top = insets.getSystemWindowInsetTop();
                     }
                     if (top <= 0) {
-                        top = initialTop;
+                        top = getStatusBarHeight(activity);
                     }
-                    if (top > 0 && v.getPaddingTop() != top) {
-                        v.setPadding(v.getPaddingLeft(), top, v.getPaddingRight(), v.getPaddingBottom());
+                    if (top > 0 && targetView.getPaddingTop() != top) {
+                        targetView.setPadding(targetView.getPaddingLeft(), top, targetView.getPaddingRight(), targetView.getPaddingBottom());
                     }
-                    return insets;
+                    return v.onApplyWindowInsets(insets);
                 });
-                targetView.requestApplyInsets();
+                decor.requestApplyInsets();
             }
         } catch (Throwable ignored) {
         }
@@ -1583,7 +1589,6 @@ public final class BrowserAdapter implements HostAdapter {
 
     private static void applyComboViewStatusBarInsets(Activity activity) {
         try {
-            int statusBarHeight = getStatusBarHeight(activity);
             Window window = activity.getWindow();
             if (window == null) {
                 return;
@@ -1594,16 +1599,23 @@ public final class BrowserAdapter implements HostAdapter {
                 content = decor;
             }
             final View targetView = content;
-            final int initialTop = statusBarHeight;
-            if (initialTop > 0 && targetView.getPaddingTop() < initialTop) {
-                targetView.setPadding(
-                        targetView.getPaddingLeft(),
-                        initialTop,
-                        targetView.getPaddingRight(),
-                        targetView.getPaddingBottom()
-                );
-            }
-            targetView.setOnApplyWindowInsetsListener((v, insets) -> {
+
+            Runnable applyInsetsAction = () -> {
+                int statusBarHeight = getStatusBarHeight(activity);
+                if (statusBarHeight > 0 && targetView.getPaddingTop() != statusBarHeight) {
+                    targetView.setPadding(
+                            targetView.getPaddingLeft(),
+                            statusBarHeight,
+                            targetView.getPaddingRight(),
+                            targetView.getPaddingBottom()
+                    );
+                }
+            };
+
+            applyInsetsAction.run();
+            targetView.post(applyInsetsAction);
+
+            decor.setOnApplyWindowInsetsListener((v, insets) -> {
                 int top = 0;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     android.graphics.Insets barInsets = insets.getInsetsIgnoringVisibility(
@@ -1614,14 +1626,14 @@ public final class BrowserAdapter implements HostAdapter {
                     top = insets.getSystemWindowInsetTop();
                 }
                 if (top <= 0) {
-                    top = initialTop;
+                    top = getStatusBarHeight(activity);
                 }
-                if (top > 0 && v.getPaddingTop() != top) {
-                    v.setPadding(v.getPaddingLeft(), top, v.getPaddingRight(), v.getPaddingBottom());
+                if (top > 0 && targetView.getPaddingTop() != top) {
+                    targetView.setPadding(targetView.getPaddingLeft(), top, targetView.getPaddingRight(), targetView.getPaddingBottom());
                 }
-                return insets;
+                return v.onApplyWindowInsets(insets);
             });
-            targetView.requestApplyInsets();
+            decor.requestApplyInsets();
 
             try {
                 window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
@@ -1642,13 +1654,30 @@ public final class BrowserAdapter implements HostAdapter {
 
     private static int getStatusBarHeight(Context context) {
         int height = 0;
-        try {
-            int resourceId = context.getResources().getIdentifier(
-                    "status_bar_height", "dimen", "android");
-            if (resourceId > 0) {
-                height = context.getResources().getDimensionPixelSize(resourceId);
+        if (context instanceof Activity) {
+            Activity act = (Activity) context;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    Window window = act.getWindow();
+                    if (window != null && window.getDecorView() != null) {
+                        WindowInsets insets = window.getDecorView().getRootWindowInsets();
+                        if (insets != null) {
+                            height = insets.getInsetsIgnoringVisibility(
+                                    WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout()).top;
+                        }
+                    }
+                } catch (Throwable ignored) {}
             }
-        } catch (Throwable ignored) {}
+        }
+        if (height <= 0) {
+            try {
+                int resourceId = context.getResources().getIdentifier(
+                        "status_bar_height", "dimen", "android");
+                if (resourceId > 0) {
+                    height = context.getResources().getDimensionPixelSize(resourceId);
+                }
+            } catch (Throwable ignored) {}
+        }
         if (height <= 0 && context instanceof Activity) {
             try {
                 Class<?> utilClz = context.getClassLoader().loadClass("com.android.browser.util.AndroidUtil");
@@ -1658,6 +1687,12 @@ public final class BrowserAdapter implements HostAdapter {
                 if (res instanceof Number) {
                     height = ((Number) res).intValue();
                 }
+            } catch (Throwable ignored) {}
+        }
+        if (height <= 0) {
+            try {
+                float density = context.getResources().getDisplayMetrics().density;
+                height = Math.round(36 * density);
             } catch (Throwable ignored) {}
         }
         return height;

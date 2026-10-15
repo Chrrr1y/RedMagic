@@ -76,8 +76,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Typography
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
@@ -125,64 +123,69 @@ object BrowserSettingsCompose {
     private val bridges = WeakHashMap<Activity, BrowserComposeBridge>()
     private val refreshNotifiers = WeakHashMap<Activity, () -> Unit>()
 
+    val NubiaRed = Color(0xFFE53935)
+    val LightBg = Color(0xFFF1F2F6)
+    val LightCard = Color(0xFFFFFFFF)
+    val LightTextPrimary = Color(0xFF1A1A1A)
+    val LightTextSecondary = Color(0xFF8A8A8E)
+    val LightDivider = Color(0xFFE5E5EA)
+    val LightChevron = Color(0xFFC7C7CC)
+    val SwitchTrackOffLight = Color(0xFFE5E5EA)
+
+    val DarkBg = Color(0xFF121212)
+    val DarkCard = Color(0xFF1E1E20)
+    val DarkTextPrimary = Color(0xFFF0F0F0)
+    val DarkTextSecondary = Color(0xFF8E8E93)
+    val DarkDivider = Color(0xFF2C2C2E)
+    val DarkChevron = Color(0xFF545458)
+    val SwitchTrackOffDark = Color(0xFF39393D)
+
     private var lightSystemColors = fallbackLightColorScheme()
     private var darkSystemColors = fallbackDarkColorScheme()
     private var currentSystemColors = lightSystemColors
 
-    private val SettingsBgLight get() = lightSystemColors.surface
-    private val SettingsBgDark get() = darkSystemColors.surface
-    private val CardBgLight get() = lightSystemColors.surfaceVariant
-    private val CardBgDark get() = darkSystemColors.surfaceVariant
-    private val TextPrimaryLight get() = lightSystemColors.onSurface
-    private val TextPrimaryDark get() = darkSystemColors.onSurface
-    private val TextSecondaryLight get() = lightSystemColors.onSurfaceVariant
-    private val TextSecondaryDark get() = darkSystemColors.onSurfaceVariant
-    private val DividerLight get() = lightSystemColors.outlineVariant
-    private val DividerDark get() = darkSystemColors.outlineVariant
-    private val RedMagicRed get() = currentSystemColors.primary
-    private val SwitchTrackOffLight get() = lightSystemColors.surfaceVariant
-    private val SwitchTrackOffDark get() = darkSystemColors.surfaceVariant
-    private val ChevronLight get() = lightSystemColors.outline
-    private val ChevronDark get() = darkSystemColors.outline
+    private val SettingsBgLight get() = LightBg
+    private val SettingsBgDark get() = DarkBg
+    private val CardBgLight get() = LightCard
+    private val CardBgDark get() = DarkCard
+    private val TextPrimaryLight get() = LightTextPrimary
+    private val TextPrimaryDark get() = DarkTextPrimary
+    private val TextSecondaryLight get() = LightTextSecondary
+    private val TextSecondaryDark get() = DarkTextSecondary
+    private val DividerLight get() = LightDivider
+    private val DividerDark get() = DarkDivider
+    private val RedMagicRed get() = NubiaRed
+    private val ChevronLight get() = LightChevron
+    private val ChevronDark get() = DarkChevron
 
     private fun fallbackLightColorScheme() = lightColorScheme(
-        primary = Color(0xFFE53935),
+        primary = NubiaRed,
         onPrimary = Color.White,
-        background = Color(0xFFF1F2F6),
-        onBackground = Color(0xFF1A1A1A),
-        surface = Color(0xFFF1F2F6),
-        onSurface = Color(0xFF1A1A1A),
-        surfaceVariant = Color.White,
-        onSurfaceVariant = Color(0xFF8A8A8E),
-        outline = Color(0xFFC7C7CC),
-        outlineVariant = Color(0xFFEFEFEF)
+        background = LightBg,
+        onBackground = LightTextPrimary,
+        surface = LightBg,
+        onSurface = LightTextPrimary,
+        surfaceVariant = LightCard,
+        onSurfaceVariant = LightTextSecondary,
+        outline = LightChevron,
+        outlineVariant = LightDivider
     )
 
     private fun fallbackDarkColorScheme() = darkColorScheme(
-        primary = Color(0xFFE53935),
+        primary = NubiaRed,
         onPrimary = Color.White,
-        background = Color(0xFF121212),
-        onBackground = Color(0xFFF0F0F0),
-        surface = Color(0xFF121212),
-        onSurface = Color(0xFFF0F0F0),
-        surfaceVariant = Color(0xFF1E1E20),
-        onSurfaceVariant = Color(0xFF8E8E93),
-        outline = Color(0xFF545458),
-        outlineVariant = Color(0xFF2C2C2E)
+        background = DarkBg,
+        onBackground = DarkTextPrimary,
+        surface = DarkBg,
+        onSurface = DarkTextPrimary,
+        surfaceVariant = DarkCard,
+        onSurfaceVariant = DarkTextSecondary,
+        outline = DarkChevron,
+        outlineVariant = DarkDivider
     )
 
     private fun systemColorSchemes(context: Context): Pair<ColorScheme, ColorScheme> {
-        val fallbackLight = fallbackLightColorScheme()
-        val fallbackDark = fallbackDarkColorScheme()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            try {
-                return Pair(
-                    dynamicLightColorScheme(context),
-                    dynamicDarkColorScheme(context)
-                )
-            } catch (ignored: Throwable) {}
-        }
-        return Pair(fallbackLight, fallbackDark)
+        return Pair(fallbackLightColorScheme(), fallbackDarkColorScheme())
     }
 
     private fun isNightMode(uiMode: Int): Boolean? =
