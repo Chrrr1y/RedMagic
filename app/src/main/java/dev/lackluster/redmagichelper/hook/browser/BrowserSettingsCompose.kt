@@ -122,6 +122,7 @@ object BrowserSettingsCompose {
 
     private val bridges = WeakHashMap<Activity, BrowserComposeBridge>()
     private val refreshNotifiers = WeakHashMap<Activity, () -> Unit>()
+    private val nativeAdaptedActivities = java.util.Collections.newSetFromMap(WeakHashMap<Activity, Boolean>())
 
     val NubiaRed = Color(0xFFE53935)
     val LightBg = Color(0xFFF1F2F6)
@@ -280,20 +281,30 @@ object BrowserSettingsCompose {
             val window = activity.window ?: return
             val decorView = window.decorView
 
-            ViewCompat.setOnApplyWindowInsetsListener(decorView, null)
-            val rootView = decorView.rootView
-            if (rootView != null) {
-                ViewCompat.setOnApplyWindowInsetsListener(rootView, null)
-                rootView.setPadding(0, 0, 0, 0)
-            }
-            decorView.setPadding(0, 0, 0, 0)
-            val content = activity.findViewById<View>(android.R.id.content)
-            if (content != null) {
-                ViewCompat.setOnApplyWindowInsetsListener(content, null)
-                content.setPadding(0, 0, 0, 0)
-            }
+            val bgColor = if (isDark) SettingsBgDark.toArgb() else SettingsBgLight.toArgb()
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(bgColor))
+            decorView.setBackgroundColor(bgColor)
 
             WindowCompat.setDecorFitsSystemWindows(window, false)
+
+            ViewCompat.setOnApplyWindowInsetsListener(decorView) { v, insets ->
+                v.setPadding(0, 0, 0, 0)
+                insets
+            }
+            decorView.setPadding(0, 0, 0, 0)
+
+            val content = activity.findViewById<View>(android.R.id.content)
+            if (content != null) {
+                content.fitsSystemWindows = false
+                content.setPadding(0, 0, 0, 0)
+                ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+                    v.setPadding(0, 0, 0, 0)
+                    insets
+                }
+                content.post {
+                    content.setPadding(0, 0, 0, 0)
+                }
+            }
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
                 window.isStatusBarContrastEnforced = false
@@ -304,7 +315,6 @@ object BrowserSettingsCompose {
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
             window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
 
-            val bgColor = if (isDark) SettingsBgDark.toArgb() else SettingsBgLight.toArgb()
             window.statusBarColor = android.graphics.Color.TRANSPARENT
             window.navigationBarColor = bgColor
 
@@ -313,6 +323,121 @@ object BrowserSettingsCompose {
             controller.isAppearanceLightNavigationBars = !isDark
 
             ViewCompat.requestApplyInsets(decorView)
+        } catch (ignored: Throwable) {}
+    }
+
+    @JvmStatic
+    fun getStatusBarHeight(context: Context): Int {
+        var height = 0
+        if (context is Activity) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                try {
+                    val window = context.window
+                    if (window?.decorView != null) {
+                        val insets = window.decorView.rootWindowInsets
+                        if (insets != null) {
+                            height = insets.getInsetsIgnoringVisibility(
+                                android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.displayCutout()
+                            ).top
+                        }
+                    }
+                } catch (ignored: Throwable) {}
+            }
+        }
+        if (height <= 0) {
+            try {
+                val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+                if (resourceId > 0) {
+                    height = context.resources.getDimensionPixelSize(resourceId)
+                }
+            } catch (ignored: Throwable) {}
+        }
+        if (height <= 0 && context is Activity) {
+            try {
+                val utilClz = context.classLoader.loadClass("com.android.browser.util.AndroidUtil")
+                val pMethod = utilClz.getDeclaredMethod("P", Activity::class.java)
+                pMethod.isAccessible = true
+                val res = pMethod.invoke(null, context)
+                if (res is Number) {
+                    height = res.toInt()
+                }
+            } catch (ignored: Throwable) {}
+        }
+        if (height <= 0) {
+            try {
+                val density = context.resources.displayMetrics.density
+                height = Math.round(36 * density)
+            } catch (ignored: Throwable) {}
+        }
+        return height
+    }
+
+    @JvmStatic
+    fun applyNativeStatusBarAdaptive(activity: Activity) {
+        try {
+            val window = activity.window ?: return
+            val decor = window.decorView
+            val content = decor.findViewById<View>(android.R.id.content) ?: decor
+            val isDark = isDarkTheme(activity)
+
+            var topColor = if (isDark) android.graphics.Color.parseColor("#121212") else android.graphics.Color.WHITE
+            val titleBarId = activity.resources.getIdentifier("title_bar", "id", activity.packageName)
+            if (titleBarId != 0) {
+                val tb = decor.findViewById<View>(titleBarId)
+                val bg = tb?.background
+                if (bg is android.graphics.drawable.ColorDrawable) {
+                    topColor = bg.color
+                }
+            }
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(topColor))
+            decor.setBackgroundColor(topColor)
+
+            val applyInsets = {
+                val statusBarHeight = getStatusBarHeight(activity)
+                if (statusBarHeight > 0 && content.paddingTop != statusBarHeight) {
+                    content.setPadding(content.paddingLeft, statusBarHeight, content.paddingRight, content.paddingBottom)
+                }
+            }
+
+            applyInsets()
+            content.post(applyInsets)
+
+            decor.setOnApplyWindowInsetsListener { v, insets ->
+                var top = 0
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val barInsets = insets.getInsetsIgnoringVisibility(
+                        android.view.WindowInsets.Type.statusBars() or android.view.WindowInsets.Type.displayCutout()
+                    )
+                    top = barInsets.top
+                }
+                if (top <= 0) {
+                    top = insets.systemWindowInsetTop
+                }
+                if (top <= 0) {
+                    top = getStatusBarHeight(activity)
+                }
+                if (top > 0 && content.paddingTop != top) {
+                    content.setPadding(content.paddingLeft, top, content.paddingRight, content.paddingBottom)
+                }
+                v.onApplyWindowInsets(insets)
+            }
+            decor.requestApplyInsets()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isStatusBarContrastEnforced = false
+                window.isNavigationBarContrastEnforced = false
+            }
+
+            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+            window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+            window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            val navBg = if (isDark) android.graphics.Color.parseColor("#121212") else android.graphics.Color.WHITE
+            window.navigationBarColor = navBg
+
+            val controller = WindowCompat.getInsetsController(window, decor)
+            controller.isAppearanceLightStatusBars = !isDark
+            controller.isAppearanceLightNavigationBars = !isDark
         } catch (ignored: Throwable) {}
     }
 
@@ -367,9 +492,18 @@ object BrowserSettingsCompose {
         try {
             val decorView = activity.window?.decorView as? ViewGroup ?: return
             if (bridges.containsKey(activity)) return
+            if (nativeAdaptedActivities.contains(activity)) return
 
             val contentParent = activity.findViewById<ViewGroup>(android.R.id.content) ?: decorView
-            origMain = contentParent.getChildAt(0) ?: return
+            origMain = contentParent.getChildAt(0)
+            if (origMain == null) {
+                contentParent.post {
+                    if (!activity.isFinishing && !activity.isDestroyed) {
+                        attachSubSettings(activity, session)
+                    }
+                }
+                return
+            }
 
             val activityName = activity.javaClass.simpleName
             val isDedicated = activityName == "SettingAboutActivity" ||
@@ -379,6 +513,8 @@ object BrowserSettingsCompose {
             // If it's a generic settings activity and we cannot inspect any rows,
             // keep the original native view visible and do not hijack.
             if (!isDedicated && inspectViewTree(origMain).isEmpty()) {
+                nativeAdaptedActivities.add(activity)
+                applyNativeStatusBarAdaptive(activity)
                 return
             }
 

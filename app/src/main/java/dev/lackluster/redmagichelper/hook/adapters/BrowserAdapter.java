@@ -859,6 +859,16 @@ public final class BrowserAdapter implements HostAdapter {
         }
     }
 
+    private static boolean isSubSettingsActivity(String name) {
+        if (name == null || name.endsWith("BrowserSettingActivity")) {
+            return false;
+        }
+        return name.startsWith("com.android.browser.settings.")
+                || name.startsWith("com.android.browser.skin.")
+                || name.contains("ServiceSettingActivity")
+                || name.contains("SettingActivity");
+    }
+
     private static void installBrowserSettingsCompose(HookSession session) {
         Class<?> settings = session.findOptionalClass(
                 "com.android.browser.settings.BrowserSettingActivity");
@@ -894,19 +904,35 @@ public final class BrowserAdapter implements HostAdapter {
             session.log("BROWSER_SETTINGS_COMPOSE_HOOK_INSTALLED");
         }
 
-        // Sub-setting activities: transform into system-styled Compose UI
+        // Sub-setting activities: transform into system-styled Compose UI or apply adaptive insets
         Class<?> baseNightActivity = session.findOptionalClass(
                 "com.android.browser.BaseNightActivity");
         if (baseNightActivity != null) {
+            session.hook(baseNightActivity, "onCreate", chain -> {
+                Object res = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity) {
+                    Activity act = (Activity) owner;
+                    if (isSubSettingsActivity(act.getClass().getName())) {
+                        act.getWindow().getDecorView().post(() -> {
+                            if (!act.isFinishing() && !act.isDestroyed()) {
+                                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.attachSubSettings(
+                                        act, session);
+                            }
+                        });
+                    }
+                }
+                return res;
+            }, Bundle.class);
+
             session.hook(baseNightActivity, "onPostCreate", chain -> {
                 Object res = chain.proceed();
                 Object owner = chain.getThisObject();
                 if (owner instanceof Activity) {
-                    String name = owner.getClass().getName();
-                    if ((name.startsWith("com.android.browser.settings.") || name.contains("ServiceSettingActivity"))
-                            && !name.endsWith("BrowserSettingActivity")) {
+                    Activity act = (Activity) owner;
+                    if (isSubSettingsActivity(act.getClass().getName())) {
                         dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.attachSubSettings(
-                                (Activity) owner, session);
+                                act, session);
                     }
                 }
                 return res;
@@ -941,15 +967,31 @@ public final class BrowserAdapter implements HostAdapter {
         Class<?> baseActivity = session.findOptionalClass(
                 "com.android.browser.BaseActivity");
         if (baseActivity != null) {
+            session.hook(baseActivity, "onCreate", chain -> {
+                Object res = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity) {
+                    Activity act = (Activity) owner;
+                    if (isSubSettingsActivity(act.getClass().getName())) {
+                        act.getWindow().getDecorView().post(() -> {
+                            if (!act.isFinishing() && !act.isDestroyed()) {
+                                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.attachSubSettings(
+                                        act, session);
+                            }
+                        });
+                    }
+                }
+                return res;
+            }, Bundle.class);
+
             session.hook(baseActivity, "onPostCreate", chain -> {
                 Object res = chain.proceed();
                 Object owner = chain.getThisObject();
                 if (owner instanceof Activity) {
-                    String name = owner.getClass().getName();
-                    if ((name.startsWith("com.android.browser.settings.") || name.contains("ServiceSettingActivity"))
-                            && !name.endsWith("BrowserSettingActivity")) {
+                    Activity act = (Activity) owner;
+                    if (isSubSettingsActivity(act.getClass().getName())) {
                         dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.attachSubSettings(
-                                (Activity) owner, session);
+                                act, session);
                     }
                 }
                 return res;
@@ -979,6 +1021,24 @@ public final class BrowserAdapter implements HostAdapter {
                 }
                 return chain.proceed();
             });
+        }
+
+        Class<?> skinActivity = session.findOptionalClass("com.android.browser.skin.SkinActivity");
+        if (skinActivity != null) {
+            session.hook(skinActivity, "onCreate", chain -> {
+                Object res = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity) {
+                    Activity act = (Activity) owner;
+                    act.getWindow().getDecorView().post(() -> {
+                        if (!act.isFinishing() && !act.isDestroyed()) {
+                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.attachSubSettings(
+                                    act, session);
+                        }
+                    });
+                }
+                return res;
+            }, Bundle.class);
         }
 
         // Transform UserCenterActivity (ZTE Account / Mine page) into system Compose UI
@@ -1639,12 +1699,15 @@ public final class BrowserAdapter implements HostAdapter {
                 window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
                 window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
                 window.setStatusBarColor(android.graphics.Color.TRANSPARENT);
+                int uiMode = activity.getResources().getConfiguration().uiMode;
+                boolean isDark = (uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                        == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                int bgColor = isDark ? 0xFF121212 : 0xFFFFFFFF;
+                window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(bgColor));
+                decor.setBackgroundColor(bgColor);
                 androidx.core.view.WindowInsetsControllerCompat controller =
                         androidx.core.view.WindowCompat.getInsetsController(window, decor);
                 if (controller != null) {
-                    int uiMode = activity.getResources().getConfiguration().uiMode;
-                    boolean isDark = (uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
-                            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
                     controller.setAppearanceLightStatusBars(!isDark);
                 }
             } catch (Throwable ignored) {}
