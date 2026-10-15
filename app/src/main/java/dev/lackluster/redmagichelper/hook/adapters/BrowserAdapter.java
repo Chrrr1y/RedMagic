@@ -182,21 +182,24 @@ public final class BrowserAdapter implements HostAdapter {
         installSplashBypass(session);
         boolean openSearch = session.config().browserOpenSearch();
         boolean removeInfoTabs = session.config().browserRemoveInfoTabs();
-        boolean removeHomePageInfo = session.config().browserRemoveHomePageInfo();
         if (openSearch) {
             installLauncherBottomSearch(session);
         }
-        if (removeInfoTabs || removeHomePageInfo || openSearch) {
+        if (removeInfoTabs) {
             installInfoTabRemoval(session);
             installInfoFlowGuard(session);
         }
-        if (removeHomePageInfo || openSearch) {
-            installThoroughHomePurification(session);
+        // Opening the browser directly on the bottom search tab must not let
+        // HomeFirstPageHelper select the information-flow page for one frame.
+        // Install this guard even when the user only enabled default search
+        // and did not request permanent removal of the news/video tabs.
+        if (openSearch && !removeInfoTabs) {
+            installInfoFlowGuard(session);
         }
-        if (removeHomePageInfo) {
+        if (session.config().browserRemoveHomePageInfo()) {
             installHomePageInfoRemoval(session);
         }
-        if (removeHomePageInfo
+        if (session.config().browserRemoveHomePageInfo()
                 || session.config().browserRemoveHotWords()) {
             installHomeHotNewsRemoval(session);
         }
@@ -661,278 +664,43 @@ public final class BrowserAdapter implements HostAdapter {
 
     private static void installInfoTabRemoval(HookSession session) {
         Class<?> bottomBar = session.findClass("com.android.browser.BottomBar");
-        if (bottomBar != null) {
-            session.hook(bottomBar, "c0", chain -> {
-                Object result = chain.proceed();
-                hideBottomInfoViews(session, chain.getThisObject());
-                return result;
-            });
-            session.hook(bottomBar, "E0", chain -> {
-                Object result = chain.proceed();
-                hideBottomInfoViews(session, chain.getThisObject());
-                return result;
-            }, boolean.class, boolean.class);
-            session.hook(bottomBar, "G0", chain -> {
-                Object result = chain.proceed();
-                hideBottomInfoViews(session, chain.getThisObject());
-                return result;
-            }, boolean.class, boolean.class);
-            session.hook(bottomBar, "onWindowVisibilityChanged", chain -> {
-                Object result = chain.proceed();
-                hideBottomInfoViews(session, chain.getThisObject());
-                return result;
-            }, int.class);
-            session.hook(bottomBar, "onLayout", chain -> {
-                Object result = chain.proceed();
-                hideBottomInfoViews(session, chain.getThisObject());
-                return result;
-            }, boolean.class, int.class, int.class, int.class, int.class);
-        }
+        session.hook(bottomBar, "c0", chain -> {
+            Object result = chain.proceed();
+            hideBottomInfoViews(session, chain.getThisObject());
+            return result;
+        });
+        session.hook(bottomBar, "E0", chain -> {
+            Object result = chain.proceed();
+            hideBottomInfoViews(session, chain.getThisObject());
+            return result;
+        }, boolean.class, boolean.class);
+        session.hook(bottomBar, "G0", chain -> {
+            Object result = chain.proceed();
+            hideBottomInfoViews(session, chain.getThisObject());
+            return result;
+        }, boolean.class, boolean.class);
+        session.hook(bottomBar, "onWindowVisibilityChanged", chain -> {
+            Object result = chain.proceed();
+            hideBottomInfoViews(session, chain.getThisObject());
+            return result;
+        }, int.class);
+        session.hook(bottomBar, "onLayout", chain -> {
+            Object result = chain.proceed();
+            hideBottomInfoViews(session, chain.getThisObject());
+            return result;
+        }, boolean.class, int.class, int.class, int.class, int.class);
 
         Class<?> clickListener = session.findClass("com.android.browser.BottomBar$4");
-        if (clickListener != null) {
-            session.hook(clickListener, "onClick", chain -> {
-                Object value = HookValues.arg(chain, 0);
-                if (value instanceof View) {
-                    View v = (View) value;
-                    String resName = HookValues.resourceEntryName(v);
-                    boolean purifyHome = session.config().browserRemoveHomePageInfo()
-                            || session.config().browserOpenSearch();
-                    if (purifyHome && isHomePageTriggerId(resName)) {
-                        if (redirectToSeekPage(session, v)) {
-                            session.log("BROWSER_BOTTOM_HOME_CLICK_REDIRECTED_TO_SEEK");
-                            return null;
-                        }
-                    }
-                    if (HookValues.hasResourceId(v, session.packageName(), BOTTOM_CLICK_IDS)) {
-                        session.log("BROWSER_INFO_TAB_CLICK_BLOCKED");
-                        return null;
-                    }
-                }
-                return chain.proceed();
-            }, View.class);
-        }
-    }
-
-    private static boolean isHomePageTriggerId(String name) {
-        return "cont_homepage".equals(name)
-                || "cont_homepage_1".equals(name)
-                || "iv_homepage".equals(name)
-                || "tv_homepage".equals(name)
-                || "iv_homepage_1".equals(name)
-                || "tv_homepage_1".equals(name);
-    }
-
-    private static boolean redirectToSeekPage(HookSession session, View view) {
-        if (view == null) return false;
-        try {
-            View bottomBar = findBottomBar(view);
-            View root = bottomBar != null ? bottomBar : view.getRootView();
-            View seekTab = HookValues.findView(root, session.packageName(), "cont_seek");
-            if (seekTab != null) {
-                boolean clicked = seekTab.performClick();
-                if (clicked) {
-                    return true;
-                }
+        session.hook(clickListener, "onClick", chain -> {
+            Object value = HookValues.arg(chain, 0);
+            if (value instanceof View
+                    && HookValues.hasResourceId((View) value, session.packageName(),
+                    BOTTOM_CLICK_IDS)) {
+                session.log("BROWSER_INFO_TAB_CLICK_BLOCKED");
+                return null;
             }
-            Object browserActivity = bottomBar == null ? null : HookValues.readField(bottomBar, "s");
-            if (browserActivity != null) {
-                Object controller = HookValues.readField(browserActivity, "q");
-                if (controller != null) {
-                    return switchControllerToSeek(session, controller);
-                }
-            }
-        } catch (Throwable t) {
-            session.log("REDIRECT_TO_SEEK_PAGE_FAILED: " + t.getMessage());
-        }
-        return false;
-    }
-
-    private static boolean switchControllerToSeek(HookSession session, Object controller) {
-        if (controller == null) return false;
-        try {
-            Method m2 = HookValues.findNoArgMethod(controller, "m2");
-            if (m2 != null) {
-                m2.invoke(controller);
-            }
-            Object ui = HookValues.readField(controller, "c");
-            if (ui != null) {
-                Object bottomBar = HookValues.readField(ui, "u");
-                if (bottomBar != null) {
-                    Class<?> toggleClz = session.findOptionalClass("com.android.browser.bar.MenuToggle");
-                    if (toggleClz != null) {
-                        Object seekToggle = HookValues.readField(toggleClz, "SEEK");
-                        if (seekToggle != null) {
-                            Method r0 = HookValues.findMethod(bottomBar, "r0", toggleClz);
-                            if (r0 != null) {
-                                r0.invoke(bottomBar, seekToggle);
-                            }
-                        }
-                    }
-                }
-            }
-            return true;
-        } catch (Throwable t) {
-            session.log("SWITCH_CONTROLLER_TO_SEEK_FAILED: " + t.getMessage());
-            return false;
-        }
-    }
-
-    private static boolean canCurrentTabGoBack(Object controller) {
-        if (controller == null) return false;
-        try {
-            Object tab = HookValues.invokeNoArg(controller, "q0");
-            if (tab != null) {
-                Object webView = HookValues.invokeNoArg(tab, "P0");
-                if (webView != null) {
-                    Method canGoBack = HookValues.findNoArgMethod(webView, "canGoBack", "W");
-                    if (canGoBack != null) {
-                        Object res = canGoBack.invoke(webView);
-                        if (res instanceof Boolean) {
-                            return (Boolean) res;
-                        }
-                    }
-                }
-            }
-        } catch (Throwable ignored) {}
-        return false;
-    }
-
-    private static void redirectToSeekFromUi(HookSession session, Object ui) {
-        if (ui == null) return;
-        try {
-            Object homeNav = HookValues.readField(ui, "k");
-            if (homeNav != null) {
-                if (homeNav instanceof View) {
-                    ((View) homeNav).setVisibility(View.VISIBLE);
-                    ((View) homeNav).bringToFront();
-                }
-                Method showSeek = HookValues.findMethod(homeNav, "E", boolean.class);
-                if (showSeek != null) {
-                    showSeek.invoke(homeNav, true);
-                }
-            }
-            Object bottomBar = HookValues.readField(ui, "u");
-            if (bottomBar != null) {
-                Class<?> toggleClz = session.findOptionalClass("com.android.browser.bar.MenuToggle");
-                if (toggleClz != null) {
-                    Object seekToggle = HookValues.readField(toggleClz, "SEEK");
-                    if (seekToggle != null) {
-                        Method r0 = HookValues.findMethod(bottomBar, "r0", toggleClz);
-                        if (r0 != null) {
-                            r0.invoke(bottomBar, seekToggle);
-                        }
-                    }
-                }
-            }
-        } catch (Throwable t) {
-            session.log("REDIRECT_TO_SEEK_FROM_UI_FAILED: " + t.getMessage());
-        }
-    }
-
-    private static void installThoroughHomePurification(HookSession session) {
-        Class<?> controllerClz = session.findClass("com.android.browser.Controller");
-        if (controllerClz != null) {
-            session.hook(controllerClz, "C0", chain -> {
-                Object controller = chain.getThisObject();
-                if (switchControllerToSeek(session, controller)) {
-                    session.log("BROWSER_CONTROLLER_C0_REDIRECTED_TO_SEEK");
-                    return null;
-                }
-                return chain.proceed();
-            });
-
-            session.hook(controllerClz, "K", chain -> {
-                Object res = chain.proceed();
-                Object controller = chain.getThisObject();
-                switchControllerToSeek(session, controller);
-                session.log("BROWSER_CONTROLLER_K_NEW_TAB_REDIRECTED_TO_SEEK");
-                return res;
-            });
-
-            session.hook(controllerClz, "I1", chain -> {
-                Object res = chain.proceed();
-                Object controller = chain.getThisObject();
-                switchControllerToSeek(session, controller);
-                session.log("BROWSER_CONTROLLER_I1_CLOSE_ALL_REDIRECTED_TO_SEEK");
-                return res;
-            }, boolean.class);
-
-            session.hook(controllerClz, "j2", chain -> {
-                Object controller = chain.getThisObject();
-                if (canCurrentTabGoBack(controller)) {
-                    return chain.proceed();
-                }
-                if (switchControllerToSeek(session, controller)) {
-                    session.log("BROWSER_CONTROLLER_J2_BACK_ROOT_REDIRECTED_TO_SEEK");
-                    return null;
-                }
-                return chain.proceed();
-            });
-        }
-
-        Class<?> baseUi = session.findClass("com.android.browser.BaseUi");
-        if (baseUi != null) {
-            session.hook(baseUi, "H", chain -> {
-                Boolean show = (Boolean) chain.getArg(0);
-                if (Boolean.TRUE.equals(show)) {
-                    chain.getArgs().set(0, Boolean.FALSE);
-                    try {
-                        chain.proceed();
-                    } catch (Throwable ignored) {}
-
-                    Object ui = chain.getThisObject();
-                    redirectToSeekFromUi(session, ui);
-                    session.log("BROWSER_BASE_UI_H_REDIRECTED_TO_SEEK");
-                    return null;
-                }
-                return chain.proceed();
-            }, boolean.class);
-        }
-
-        Class<?> nuHomeRoot = session.findOptionalClass("com.android.browser.ui.NuHomeFirstRootView");
-        if (nuHomeRoot != null) {
-            session.hook(nuHomeRoot, "setVisibility", chain -> {
-                return HookValues.proceedWithArgument(chain, 0, View.GONE);
-            }, int.class);
-            session.hook(nuHomeRoot, "onAttachedToWindow", chain -> {
-                Object res = chain.proceed();
-                Object obj = chain.getThisObject();
-                if (obj instanceof View) {
-                    ((View) obj).setVisibility(View.GONE);
-                }
-                return res;
-            });
-        }
-
-        Class<?> homeConfig = session.findOptionalClass("com.android.browser.HomeConfigManager");
-        if (homeConfig != null) {
-            session.hook(homeConfig, "c", chain -> "about:blank");
-            session.hook(homeConfig, "e", chain -> Boolean.FALSE);
-        }
-
-        Class<?> newsData = session.findOptionalClass(
-                "com.android.browser.news.data.NewsDataManager");
-        if (newsData != null) {
-            session.hook(newsData, "j", chain -> null);
-            session.hook(newsData, "k", chain -> null);
-            session.hook(newsData, "G", chain -> null);
-            session.hook(newsData, "J", chain -> null);
-        }
-
-        Class<?> videoHelper = session.findOptionalClass(
-                "com.android.browser.ui.helper.VideoInfoFlowViewHepler");
-        if (videoHelper != null) {
-            session.hook(videoHelper, "P", chain -> Boolean.FALSE);
-        }
-
-        Class<?> infoFlowConfig = session.findOptionalClass(
-                "com.android.browser.news.data.InfoFlowDetailConfigsManager");
-        if (infoFlowConfig != null) {
-            session.hook(infoFlowConfig, "a", chain -> null);
-        }
-
-        session.log("BROWSER_THOROUGH_PURIFICATION_INSTALLED");
+            return chain.proceed();
+        }, View.class);
     }
 
     private static void hideBottomInfoViews(HookSession session, Object owner) {

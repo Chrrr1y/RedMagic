@@ -37,10 +37,10 @@ public final class ModuleConfig {
     }
 
     public boolean browserEnabled() {
-        return getBoolean("browser_open_search", true)
+        return getBoolean("browser_open_search", false)
                 || getBoolean("browser_skip_splash", false)
-                || getBoolean("browser_remove_info_tabs", true)
-                || getBoolean("browser_remove_homepage_info", true)
+                || getBoolean("browser_remove_info_tabs", false)
+                || getBoolean("browser_remove_homepage_info", false)
                 || getBoolean("browser_slim_mine", false)
                 || getBoolean("browser_remove_hot_words", false)
                 || getBoolean("browser_remove_search_shortcuts", false)
@@ -60,15 +60,15 @@ public final class ModuleConfig {
     }
 
     public boolean browserOpenSearch() {
-        return getBoolean("browser_open_search", true);
+        return getBoolean("browser_open_search", false);
     }
 
     public boolean browserRemoveInfoTabs() {
-        return getBoolean("browser_remove_info_tabs", true);
+        return getBoolean("browser_remove_info_tabs", false);
     }
 
     public boolean browserRemoveHomePageInfo() {
-        return getBoolean("browser_remove_homepage_info", true);
+        return getBoolean("browser_remove_homepage_info", false);
     }
 
     public boolean browserSlimMine() {

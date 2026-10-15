@@ -114,7 +114,7 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
         SettingItem.Toggle("浏览器启动时打开搜索页", "browser_open_search", "启动时默认打开搜索页，支持冷热启动自动重定向到纯净搜索。"),
         SettingItem.Toggle("跳过浏览器启动广告", "browser_skip_splash", "跳过冷启动开屏欢迎广告及引导页广告。"),
         SettingItem.Toggle("去除底部视频与资讯", "browser_remove_info_tabs", "彻底移除底部导航栏中的资讯与视频入口，阻止信息流加载。"),
-        SettingItem.Toggle("彻底净化浏览器主页", "browser_remove_homepage_info", "彻底净化浏览器主页，从根源切除资讯流与推荐，重定向新建标签及主页按键至纯净搜索。"),
+        SettingItem.Toggle("删除浏览器主页资讯", "browser_remove_homepage_info", "隐藏设置中的“主页资讯”，并移除主页热门资讯内容。"),
         SettingItem.Toggle("删除常用服务与短剧", "browser_slim_mine", "精简“我的”与首页，移除常用服务、热门短剧、应用推荐等内容。"),
         SettingItem.Toggle("删除搜索页热门短剧", "browser_remove_hot_words", "移除搜索页猜你想搜、热门短剧及热搜榜单。"),
         SettingItem.Toggle("删除搜索框下方快捷图标", "browser_remove_search_shortcuts", "隐藏红魔商城、58同城、问AI、京东、百度搜索快捷入口及页面指示圆点。"),
