@@ -277,6 +277,11 @@ object BrowserSettingsCompose {
     }
 
     @JvmStatic
+    fun isNativeAdapted(activity: Activity): Boolean {
+        return nativeAdaptedActivities.contains(activity)
+    }
+
+    @JvmStatic
     fun updateSystemBars(activity: Activity, isDark: Boolean) {
         try {
             val window = activity.window ?: return
@@ -290,17 +295,23 @@ object BrowserSettingsCompose {
 
             ViewCompat.setOnApplyWindowInsetsListener(decorView) { v, insets ->
                 v.setPadding(0, 0, 0, 0)
-                insets
+                ViewCompat.onApplyWindowInsets(v, insets)
             }
             decorView.setPadding(0, 0, 0, 0)
 
-            val content = activity.findViewById<View>(android.R.id.content)
+            val content = activity.findViewById<ViewGroup>(android.R.id.content)
             if (content != null) {
                 content.fitsSystemWindows = false
                 content.setPadding(0, 0, 0, 0)
+                content.setBackgroundColor(bgColor)
+                content.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+                    if (v.paddingTop != 0 || v.paddingBottom != 0 || v.paddingLeft != 0 || v.paddingRight != 0) {
+                        v.setPadding(0, 0, 0, 0)
+                    }
+                }
                 ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
                     v.setPadding(0, 0, 0, 0)
-                    insets
+                    ViewCompat.onApplyWindowInsets(v, insets)
                 }
                 content.post {
                     content.setPadding(0, 0, 0, 0)
@@ -461,6 +472,8 @@ object BrowserSettingsCompose {
             bridge.attach(decorView)
 
             val contentParent = activity.findViewById<ViewGroup>(android.R.id.content) ?: decorView
+            contentParent.fitsSystemWindows = false
+            contentParent.setPadding(0, 0, 0, 0)
 
             val origMainId = activity.resources.getIdentifier(
                 "setting_main_layout", "id", activity.packageName
@@ -1123,7 +1136,7 @@ object BrowserSettingsCompose {
                         containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
                         titleContentColor = if (isDark) TextPrimaryDark else TextPrimaryLight
                     ),
-                    windowInsets = WindowInsets.statusBars
+                    windowInsets = WindowInsets(0, 0, 0, 0)
                 )
             },
             containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
@@ -1360,7 +1373,7 @@ object BrowserSettingsCompose {
                         containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
                         titleContentColor = if (isDark) TextPrimaryDark else TextPrimaryLight
                     ),
-                    windowInsets = WindowInsets.statusBars
+                    windowInsets = WindowInsets(0, 0, 0, 0)
                 )
             },
             containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
@@ -3139,7 +3152,7 @@ object BrowserSettingsCompose {
                         containerColor = if (isDark) SettingsBgDark else SettingsBgLight,
                         titleContentColor = if (isDark) TextPrimaryDark else TextPrimaryLight
                     ),
-                    windowInsets = WindowInsets.statusBars
+                    windowInsets = WindowInsets(0, 0, 0, 0)
                 )
             },
             containerColor = if (isDark) SettingsBgDark else SettingsBgLight,

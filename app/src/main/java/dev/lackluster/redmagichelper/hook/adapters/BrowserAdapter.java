@@ -905,6 +905,24 @@ public final class BrowserAdapter implements HostAdapter {
             session.log("BROWSER_SETTINGS_COMPOSE_HOOK_INSTALLED");
         }
 
+        Class<?> util = session.findOptionalClass("com.android.browser.util.AndroidUtil");
+        if (util != null) {
+            session.hook(util, "t0", chain -> {
+                Object actObj = chain.getArg(0);
+                if (actObj instanceof Activity) {
+                    Activity act = (Activity) actObj;
+                    String name = act.getClass().getName();
+                    if (name.contains("BrowserSettingActivity") ||
+                            (name.contains("Setting") && !dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isNativeAdapted(act))) {
+                        dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.updateSystemBars(
+                                act, dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isDarkTheme(act));
+                        return null;
+                    }
+                }
+                return chain.proceed();
+            }, Activity.class);
+        }
+
         // Sub-setting activities: transform into system-styled Compose UI or apply adaptive insets
         Class<?> baseNightActivity = session.findOptionalClass(
                 "com.android.browser.BaseNightActivity");
@@ -1022,6 +1040,24 @@ public final class BrowserAdapter implements HostAdapter {
                 }
                 return chain.proceed();
             });
+
+            Class<?> insetsClz = session.findOptionalClass("androidx.core.view.WindowInsetsCompat");
+            if (insetsClz != null) {
+                session.hook(baseActivity, "u", chain -> {
+                    Object targetView = chain.getArg(0);
+                    if (targetView instanceof View) {
+                        Context ctx = ((View) targetView).getContext();
+                        if (ctx instanceof Activity) {
+                            String name = ctx.getClass().getName();
+                            if (name.contains("BrowserSettingActivity") ||
+                                    (name.contains("Setting") && !dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.isNativeAdapted((Activity) ctx))) {
+                                return chain.getArg(2);
+                            }
+                        }
+                    }
+                    return chain.proceed();
+                }, View.class, View.class, insetsClz);
+            }
         }
 
         // Transform UserCenterActivity (ZTE Account / Mine page) into system Compose UI
