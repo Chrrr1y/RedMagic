@@ -26,6 +26,7 @@ import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.ColorDrawable
 import java.lang.reflect.Proxy
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -59,6 +60,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -128,6 +130,27 @@ object BrowserSettingsCompose {
     private val bridges = WeakHashMap<Activity, BrowserComposeBridge>()
     private val refreshNotifiers = WeakHashMap<Activity, () -> Unit>()
     private val nativeAdaptedActivities = java.util.Collections.newSetFromMap(WeakHashMap<Activity, Boolean>())
+
+    /**
+     * The browser installs a padding based insets listener on its content
+     * root. Keep the original padding separately so re-applying insets on
+     * resume or after an IME transition never accumulates another status bar
+     * height.
+     */
+    private data class NativePaddingBase(
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int
+    )
+
+    private data class NativeSurfaceState(val dark: Boolean, val color: Int)
+
+    private val nativePaddingBases = WeakHashMap<View, NativePaddingBase>()
+    private val nativeSurfaceStates = WeakHashMap<Activity, NativeSurfaceState>()
+    private val nativeRefreshPending = java.util.Collections.newSetFromMap(
+        WeakHashMap<Activity, Boolean>()
+    )
 
     val NubiaRed = Color(0xFFE53935)
     val LightBg = Color(0xFFF1F2F6)
@@ -298,27 +321,34 @@ object BrowserSettingsCompose {
             WindowCompat.setDecorFitsSystemWindows(window, false)
 
             ViewCompat.setOnApplyWindowInsetsListener(decorView) { v, insets ->
-                v.setPadding(0, 0, 0, 0)
-                ViewCompat.onApplyWindowInsets(v, insets)
+                // Compose Material components consume the insets they need.
+                // The host browser's legacy listener must not add another
+                // padding pass to the decor hierarchy.
+                if (v.paddingLeft != 0 || v.paddingTop != 0 ||
+                    v.paddingRight != 0 || v.paddingBottom != 0
+                ) {
+                    v.setPadding(0, 0, 0, 0)
+                }
+                insets
             }
             decorView.setPadding(0, 0, 0, 0)
 
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
             if (content != null) {
                 content.fitsSystemWindows = false
-                content.setPadding(0, 0, 0, 0)
+                if (content.paddingLeft != 0 || content.paddingTop != 0 ||
+                    content.paddingRight != 0 || content.paddingBottom != 0
+                ) {
+                    content.setPadding(0, 0, 0, 0)
+                }
                 content.setBackgroundColor(bgColor)
-                content.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
-                    if (v.paddingTop != 0 || v.paddingBottom != 0 || v.paddingLeft != 0 || v.paddingRight != 0) {
+                ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
+                    if (v.paddingLeft != 0 || v.paddingTop != 0 ||
+                        v.paddingRight != 0 || v.paddingBottom != 0
+                    ) {
                         v.setPadding(0, 0, 0, 0)
                     }
-                }
-                ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
-                    v.setPadding(0, 0, 0, 0)
-                    ViewCompat.onApplyWindowInsets(v, insets)
-                }
-                content.post {
-                    content.setPadding(0, 0, 0, 0)
+                    insets
                 }
             }
 
@@ -401,36 +431,20 @@ object BrowserSettingsCompose {
             val isSearch = activityName.contains("SearchActivity") ||
                 decor.findViewById<View>(activity.resources.getIdentifier("searchTopLayout", "id", activity.packageName)) != null
 
-            var topColor = if (isDark) {
-                if (isSearch) android.graphics.Color.BLACK else android.graphics.Color.parseColor("#121212")
-            } else {
-                if (isSearch) android.graphics.Color.parseColor("#FFF7F7F7") else android.graphics.Color.WHITE
-            }
-
-            if (isSearch) {
-                try {
-                    val colorResName = if (isDark) "new_background_nightmode" else "new_background"
-                    val colorResId = activity.resources.getIdentifier(colorResName, "color", activity.packageName)
-                    if (colorResId != 0) {
-                        topColor = ContextCompat.getColor(activity, colorResId)
-                    }
-                } catch (ignored: Throwable) {}
-            } else {
-                val tabsId = activity.resources.getIdentifier("tabsContainer", "id", activity.packageName)
-                val titleBarId = activity.resources.getIdentifier("title_bar", "id", activity.packageName)
-                val editTitleBarId = activity.resources.getIdentifier("edit_title_bar", "id", activity.packageName)
-                val headerView = (if (tabsId != 0) decor.findViewById<View>(tabsId)?.takeIf { it.visibility == View.VISIBLE } else null)
-                    ?: (if (editTitleBarId != 0) decor.findViewById<View>(editTitleBarId)?.takeIf { it.visibility == View.VISIBLE } else null)
-                    ?: (if (titleBarId != 0) decor.findViewById<View>(titleBarId)?.takeIf { it.visibility == View.VISIBLE } else null)
-                    ?: (if (tabsId != 0) decor.findViewById<View>(tabsId) else null)
-
-                if (headerView != null) {
-                    val bg = headerView.background
-                    if (bg is android.graphics.drawable.ColorDrawable && bg.color != 0) {
-                        topColor = bg.color
-                    }
+            val previousSurface = nativeSurfaceStates[activity]
+            val topColor = previousSurface
+                ?.takeIf { it.dark == isDark }
+                ?.color
+                ?: resolveNativeSurfaceColor(
+                    activity,
+                    decor,
+                    content,
+                    isSearch,
+                    isDark,
+                    ignoreCurrentSurface = previousSurface != null && previousSurface.dark != isDark
+                ).also {
+                    nativeSurfaceStates[activity] = NativeSurfaceState(isDark, it)
                 }
-            }
 
             window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(topColor))
             decor.setBackgroundColor(topColor)
@@ -447,50 +461,146 @@ object BrowserSettingsCompose {
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
             window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
             window.statusBarColor = android.graphics.Color.TRANSPARENT
-            val navBg = if (isDark) topColor else android.graphics.Color.WHITE
-            window.navigationBarColor = navBg
+            // On Android 15+ the navigation bar is transparent in edge-to-edge
+            // mode. Use the same surface color so the area behind the gesture
+            // handle does not flash to the browser's old white default.
+            window.navigationBarColor = topColor
+
+            // Search and bookmark pages do not declare adjustResize in every
+            // browser build. Preserve the existing keyboard visibility/state
+            // bits while opting into resize so the IME inset can move the
+            // input field above the keyboard.
+            val softInputMode = window.attributes.softInputMode
+            window.setSoftInputMode(
+                (softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST.inv())
+                    or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+            )
 
             val controller = WindowCompat.getInsetsController(window, decor)
             controller.isAppearanceLightStatusBars = !isDark
             controller.isAppearanceLightNavigationBars = !isDark
 
-            val statusBarHeight = getStatusBarHeight(activity)
-
             content.fitsSystemWindows = false
-            if (statusBarHeight > 0) {
-                content.setPadding(content.paddingLeft, statusBarHeight, content.paddingRight, content.paddingBottom)
+            val base = nativePaddingBases.getOrPut(content) {
+                NativePaddingBase(
+                    content.paddingLeft,
+                    content.paddingTop,
+                    content.paddingRight,
+                    content.paddingBottom
+                )
             }
 
             ViewCompat.setOnApplyWindowInsetsListener(content) { v, insets ->
-                var top = insets.getInsetsIgnoringVisibility(
-                    WindowInsetsCompat.Type.statusBars() or WindowInsetsCompat.Type.displayCutout()
-                ).top
+                val safe = insets.getInsetsIgnoringVisibility(
+                    WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+                )
+                var top = safe.top
                 if (top <= 0) {
                     top = getStatusBarHeight(activity)
                 }
                 val imeBottom = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-                val navBottom = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars()).bottom
-                val bottom = Math.max(imeBottom, navBottom)
-                if (top > 0 && (v.paddingTop != top || v.paddingBottom != bottom)) {
-                    v.setPadding(v.paddingLeft, top, v.paddingRight, bottom)
+                val navBottom = safe.bottom
+                val left = base.left + safe.left
+                val right = base.right + safe.right
+                val bottom = base.bottom + Math.max(imeBottom, navBottom)
+                val resolvedTop = base.top + top
+                if (v.paddingLeft != left || v.paddingTop != resolvedTop ||
+                    v.paddingRight != right || v.paddingBottom != bottom
+                ) {
+                    v.setPadding(left, resolvedTop, right, bottom)
                 }
-                insets
+                // The content root owns the padding. Do not dispatch the same
+                // system bars to legacy descendants a second time.
+                WindowInsetsCompat.CONSUMED
             }
 
             ViewCompat.setOnApplyWindowInsetsListener(decor) { _, insets ->
                 insets
             }
 
-            content.post {
-                val h = getStatusBarHeight(activity)
-                if (h > 0 && content.paddingTop != h) {
-                    content.setPadding(content.paddingLeft, h, content.paddingRight, content.paddingBottom)
+            if (nativeRefreshPending.add(activity)) {
+                content.post {
+                    nativeRefreshPending.remove(activity)
+                    if (!activity.isFinishing && !activity.isDestroyed) {
+                        // Header and tab backgrounds are often assigned after
+                        // setContentView. Refresh the surfaces once after the
+                        // first layout without reinstalling the listener.
+                        val refreshed = resolveNativeSurfaceColor(
+                            activity,
+                            decor,
+                            content,
+                            isSearch,
+                            isDark,
+                            ignoreCurrentSurface = false
+                        )
+                        if (refreshed != topColor) {
+                            nativeSurfaceStates[activity] = NativeSurfaceState(isDark, refreshed)
+                            window.setBackgroundDrawable(ColorDrawable(refreshed))
+                            decor.setBackgroundColor(refreshed)
+                            content.setBackgroundColor(refreshed)
+                            window.navigationBarColor = refreshed
+                        }
+                        ViewCompat.requestApplyInsets(decor)
+                    }
                 }
-                window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(topColor))
-                decor.setBackgroundColor(topColor)
-                content.setBackgroundColor(topColor)
             }
+            ViewCompat.requestApplyInsets(decor)
         } catch (ignored: Throwable) {}
+    }
+
+    private fun resolveNativeSurfaceColor(
+        activity: Activity,
+        decor: View,
+        content: View,
+        isSearch: Boolean,
+        isDark: Boolean,
+        ignoreCurrentSurface: Boolean
+    ): Int {
+        val headerIds = arrayOf("tabsContainer", "edit_title_bar", "title_bar", "titlebar")
+        for (name in headerIds) {
+            val id = activity.resources.getIdentifier(name, "id", activity.packageName)
+            if (id != 0) {
+                val view = decor.findViewById<View>(id)
+                if (view != null && view.visibility != View.GONE) {
+                    drawableColor(view.background)?.let { return it }
+                }
+            }
+        }
+
+        if (isSearch) {
+            val resourceName = if (isDark) "new_background_nightmode" else "new_background"
+            colorResource(activity, resourceName)?.let { return it }
+        }
+
+        // ComboViewActivity sets the decor background through NuThemeHelper,
+        // which is more reliable than a theme resource on vendor night mode.
+        if (!ignoreCurrentSurface) {
+            drawableColor(decor.background)?.let { return it }
+            drawableColor(content.background)?.let { return it }
+        }
+
+        val fallbackName = when {
+            isDark && isSearch -> "new_background_nightmode"
+            isDark -> "nightmode_bg_color2"
+            else -> "common_background"
+        }
+        return colorResource(activity, fallbackName)
+            ?: if (isDark) android.graphics.Color.rgb(32, 35, 39)
+            else android.graphics.Color.WHITE
+    }
+
+    private fun colorResource(context: Context, name: String): Int? {
+        return try {
+            val id = context.resources.getIdentifier(name, "color", context.packageName)
+            if (id != 0) ContextCompat.getColor(context, id) else null
+        } catch (ignored: Throwable) {
+            null
+        }
+    }
+
+    private fun drawableColor(drawable: Drawable?): Int? {
+        val color = (drawable as? ColorDrawable)?.color ?: return null
+        return if (android.graphics.Color.alpha(color) == 0) null else color
     }
 
     @JvmStatic
@@ -532,6 +642,7 @@ object BrowserSettingsCompose {
                 }
             }
             contentParent.addView(composeView)
+            ViewCompat.requestApplyInsets(decorView)
             origMain?.visibility = View.GONE
             session.log("BROWSER_COMPOSE_SETTINGS_ATTACHED")
         } catch (t: Throwable) {
@@ -595,6 +706,7 @@ object BrowserSettingsCompose {
 
             origMain.visibility = View.INVISIBLE
             contentParent.addView(composeView)
+            ViewCompat.requestApplyInsets(decorView)
             session.log("BROWSER_COMPOSE_SUB_SETTINGS_ATTACHED for " + activity.javaClass.simpleName)
         } catch (t: Throwable) {
             origMain?.visibility = View.VISIBLE
@@ -633,6 +745,7 @@ object BrowserSettingsCompose {
                 }
             }
             contentParent.addView(composeView)
+            ViewCompat.requestApplyInsets(decorView)
             session.log("BROWSER_COMPOSE_USER_CENTER_ATTACHED")
         } catch (t: Throwable) {
             session.log("BROWSER_COMPOSE_USER_CENTER_FAILED " + t.message)
@@ -688,6 +801,7 @@ object BrowserSettingsCompose {
                 }
             }
             contentParent.addView(composeView)
+            ViewCompat.requestApplyInsets(decorView)
             session.log("BROWSER_COMPOSE_SKIN_ATTACHED")
         } catch (t: Throwable) {
             origList?.visibility = View.VISIBLE
@@ -713,7 +827,11 @@ object BrowserSettingsCompose {
     @JvmStatic
     fun onResume(owner: Any?) {
         if (owner is Activity) {
-            updateSystemBars(owner, isDarkTheme(owner))
+            if (nativeAdaptedActivities.contains(owner)) {
+                applyNativeStatusBarAdaptive(owner)
+            } else {
+                updateSystemBars(owner, isDarkTheme(owner))
+            }
             bridges[owner]?.onResume()
             refreshNotifiers[owner]?.invoke()
         }
@@ -731,6 +849,8 @@ object BrowserSettingsCompose {
         if (owner is Activity) {
             bridges.remove(owner)?.onDestroy()
             refreshNotifiers.remove(owner)
+            nativeSurfaceStates.remove(owner)
+            nativeRefreshPending.remove(owner)
         }
     }
 
@@ -747,6 +867,21 @@ object BrowserSettingsCompose {
 
     @JvmStatic
     fun isDarkTheme(activity: Activity? = null): Boolean {
+        // Nubia Browser keeps its night-mode state in ThemeManager, which can
+        // differ from the platform UI mode. Prefer that value for injected
+        // browser windows so status-bar icons match the actual surface.
+        if (activity != null) {
+            try {
+                val helper = activity.classLoader.loadClass(
+                    "com.android.browser.ui.helper.NuThemeHelper"
+                )
+                val method = helper.getDeclaredMethod("p")
+                method.isAccessible = true
+                val value = method.invoke(null)
+                if (value is Boolean) return value
+            } catch (ignored: Throwable) {}
+        }
+
         val systemNightMode = try {
             isNightMode(Resources.getSystem().configuration.uiMode)
         } catch (ignored: Throwable) {
@@ -1251,7 +1386,8 @@ object BrowserSettingsCompose {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues),
+                    .padding(paddingValues)
+                    .consumeWindowInsets(paddingValues),
                 contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 2.dp, bottom = 16.dp)
             ) {
                 // User Center Profile Header Card
@@ -1488,7 +1624,8 @@ object BrowserSettingsCompose {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues),
+                    .padding(paddingValues)
+                    .consumeWindowInsets(paddingValues),
                 contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 2.dp, bottom = 16.dp)
             ) {
                 // Check if specific layout is recognized
@@ -3267,7 +3404,8 @@ object BrowserSettingsCompose {
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues),
+                    .padding(paddingValues)
+                    .consumeWindowInsets(paddingValues),
                 contentPadding = PaddingValues(start = 0.dp, end = 0.dp, top = 2.dp, bottom = 16.dp)
             ) {
                 // Account Card
@@ -3612,7 +3750,8 @@ object BrowserSettingsCompose {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues),
+                        .padding(paddingValues)
+                        .consumeWindowInsets(paddingValues),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -3625,7 +3764,8 @@ object BrowserSettingsCompose {
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(paddingValues),
+                        .padding(paddingValues)
+                        .consumeWindowInsets(paddingValues),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 24.dp)
                 ) {
                     items(

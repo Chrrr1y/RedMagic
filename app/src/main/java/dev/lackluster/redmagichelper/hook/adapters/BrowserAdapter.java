@@ -232,6 +232,7 @@ public final class BrowserAdapter implements HostAdapter {
         installAdaptiveNavigationButtons(session);
         installSearchActivityStatusBarAdaptive(session);
         installComboViewStatusBarAdaptive(session);
+        installNativeBrowserInputActivityInsets(session);
         installSkinActivityStatusBarAdaptive(session);
         session.log("BROWSER_CAPABILITY_SCAN_COMPLETE");
     }
@@ -869,6 +870,28 @@ public final class BrowserAdapter implements HostAdapter {
                 || name.contains("SettingActivity");
     }
 
+    /**
+     * HookSession resolves inherited lifecycle methods on their declaring
+     * class. A hook registered against SearchActivity/ComboViewActivity can
+     * therefore run for every BaseNightActivity instance in the process.
+     * Keep callbacks scoped to the actual host page before changing its
+     * window or content padding.
+     */
+    private static boolean isActivityNamed(Object owner, String simpleName) {
+        if (!(owner instanceof Activity)) {
+            return false;
+        }
+        String name = owner.getClass().getName();
+        return name.equals("com.android.browser." + simpleName)
+                || name.equals("com.android.browser.settings." + simpleName)
+                || name.endsWith("." + simpleName);
+    }
+
+    private static boolean isSubSettingsOwner(Object owner) {
+        return owner instanceof Activity
+                && isSubSettingsActivity(owner.getClass().getName());
+    }
+
     private static void installBrowserSettingsCompose(HookSession session) {
         Class<?> settings = session.findOptionalClass(
                 "com.android.browser.settings.BrowserSettingActivity");
@@ -968,7 +991,7 @@ public final class BrowserAdapter implements HostAdapter {
             session.hook(baseNightActivity, "onResume", chain -> {
                 Object res = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isSubSettingsOwner(owner)) {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onResume(owner);
                 }
                 return res;
@@ -976,7 +999,7 @@ public final class BrowserAdapter implements HostAdapter {
 
             session.hook(baseNightActivity, "onPause", chain -> {
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isSubSettingsOwner(owner)) {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onPause(owner);
                 }
                 return chain.proceed();
@@ -984,7 +1007,7 @@ public final class BrowserAdapter implements HostAdapter {
 
             session.hook(baseNightActivity, "onDestroy", chain -> {
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isSubSettingsOwner(owner)) {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onDestroy(owner);
                 }
                 return chain.proceed();
@@ -997,7 +1020,8 @@ public final class BrowserAdapter implements HostAdapter {
             session.hook(baseActivity, "onCreate", chain -> {
                 Object res = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (owner instanceof Activity
+                        && (baseNightActivity == null || !baseNightActivity.isInstance(owner))) {
                     Activity act = (Activity) owner;
                     if (isSubSettingsActivity(act.getClass().getName())) {
                         act.getWindow().getDecorView().post(() -> {
@@ -1014,7 +1038,8 @@ public final class BrowserAdapter implements HostAdapter {
             session.hook(baseActivity, "onPostCreate", chain -> {
                 Object res = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (owner instanceof Activity
+                        && (baseNightActivity == null || !baseNightActivity.isInstance(owner))) {
                     Activity act = (Activity) owner;
                     if (isSubSettingsActivity(act.getClass().getName())) {
                         dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.attachSubSettings(
@@ -1027,7 +1052,8 @@ public final class BrowserAdapter implements HostAdapter {
             session.hook(baseActivity, "onResume", chain -> {
                 Object res = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isSubSettingsOwner(owner)
+                        && (baseNightActivity == null || !baseNightActivity.isInstance(owner))) {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onResume(owner);
                 }
                 return res;
@@ -1035,7 +1061,8 @@ public final class BrowserAdapter implements HostAdapter {
 
             session.hook(baseActivity, "onPause", chain -> {
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isSubSettingsOwner(owner)
+                        && (baseNightActivity == null || !baseNightActivity.isInstance(owner))) {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onPause(owner);
                 }
                 return chain.proceed();
@@ -1043,7 +1070,8 @@ public final class BrowserAdapter implements HostAdapter {
 
             session.hook(baseActivity, "onDestroy", chain -> {
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isSubSettingsOwner(owner)
+                        && (baseNightActivity == null || !baseNightActivity.isInstance(owner))) {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onDestroy(owner);
                 }
                 return chain.proceed();
@@ -1592,7 +1620,7 @@ public final class BrowserAdapter implements HostAdapter {
         session.hook(searchActivity, "onCreate", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
+            if (isActivityNamed(owner, "SearchActivity")) {
                 Activity act = (Activity) owner;
                 applySearchStatusBarInsets(act);
                 act.getWindow().getDecorView().post(() -> {
@@ -1605,7 +1633,7 @@ public final class BrowserAdapter implements HostAdapter {
         session.hook(searchActivity, "onResume", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
+            if (isActivityNamed(owner, "SearchActivity")) {
                 Activity act = (Activity) owner;
                 act.getWindow().getDecorView().post(() -> {
                     applySearchStatusBarInsets(act);
@@ -1619,7 +1647,7 @@ public final class BrowserAdapter implements HostAdapter {
             session.hook(searchActivity, "onConfigurationChanged", chain -> {
                 Object result = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isActivityNamed(owner, "SearchActivity")) {
                     Activity act = (Activity) owner;
                     act.getWindow().getDecorView().post(() -> {
                         applySearchStatusBarInsets(act);
@@ -1627,28 +1655,6 @@ public final class BrowserAdapter implements HostAdapter {
                 }
                 return result;
             }, configClz);
-        }
-
-        session.hook(searchActivity, "onTextChanged", chain -> {
-            Object result = chain.proceed();
-            Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
-                applySearchStatusBarInsets((Activity) owner);
-            }
-            return result;
-        }, CharSequence.class, int.class, int.class, int.class);
-
-        Class<?> searchObserver = session.findOptionalClass("com.android.browser.SearchActivity$4");
-        if (searchObserver != null) {
-            session.hook(searchObserver, "onChanged", chain -> {
-                Object result = chain.proceed();
-                Object owner = chain.getThisObject();
-                Object actObj = HookValues.readField(owner, "a");
-                if (actObj instanceof Activity) {
-                    applySearchStatusBarInsets((Activity) actObj);
-                }
-                return result;
-            });
         }
 
         session.log("BROWSER_SEARCH_STATUS_BAR_ADAPTIVE_HOOKED");
@@ -1666,7 +1672,7 @@ public final class BrowserAdapter implements HostAdapter {
         session.hook(comboActivity, "onCreate", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
+            if (isActivityNamed(owner, "ComboViewActivity")) {
                 Activity act = (Activity) owner;
                 act.getWindow().getDecorView().post(() -> {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
@@ -1678,7 +1684,7 @@ public final class BrowserAdapter implements HostAdapter {
         session.hook(comboActivity, "setContentView", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
+            if (isActivityNamed(owner, "ComboViewActivity")) {
                 Activity act = (Activity) owner;
                 act.getWindow().getDecorView().post(() -> {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
@@ -1690,7 +1696,7 @@ public final class BrowserAdapter implements HostAdapter {
         session.hook(comboActivity, "onResume", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (owner instanceof Activity) {
+            if (isActivityNamed(owner, "ComboViewActivity")) {
                 Activity act = (Activity) owner;
                 act.getWindow().getDecorView().post(() -> {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
@@ -1701,6 +1707,41 @@ public final class BrowserAdapter implements HostAdapter {
 
         Class<?> historyPage = session.findOptionalClass("com.android.browser.BrowserHistoryPage");
         if (historyPage != null) {
+            session.hook(historyPage, "onCreateView", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof android.app.Fragment) {
+                    Activity act = ((android.app.Fragment) owner).getActivity();
+                    if (act != null) {
+                        act.getWindow().getDecorView().post(() -> {
+                            if (!act.isFinishing() && !act.isDestroyed()) {
+                                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                            }
+                        });
+                    }
+                }
+                return result;
+            }, android.view.LayoutInflater.class, ViewGroup.class, Bundle.class);
+
+            // BrowserHistoryPage declares onResume itself. Re-apply after a
+            // ViewPager tab switch because the page's title/search layout is
+            // inflated lazily and can replace the visible header.
+            session.hook(historyPage, "onResume", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof android.app.Fragment) {
+                    Activity act = ((android.app.Fragment) owner).getActivity();
+                    if (act != null) {
+                        act.getWindow().getDecorView().post(() -> {
+                            if (!act.isFinishing() && !act.isDestroyed()) {
+                                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                            }
+                        });
+                    }
+                }
+                return result;
+            });
+
             session.hook(historyPage, "M", chain -> {
                 Object result = chain.proceed();
                 Object owner = chain.getThisObject();
@@ -1716,25 +1757,104 @@ public final class BrowserAdapter implements HostAdapter {
             }, boolean.class);
         }
 
-        Class<?> historyWatcher = session.findOptionalClass("com.android.browser.BrowserHistoryPage$2");
-        if (historyWatcher != null) {
-            session.hook(historyWatcher, "onTextChanged", chain -> {
+        Class<?> bookmarksPage = session.findOptionalClass("com.android.browser.BrowserBookmarksPage");
+        if (bookmarksPage != null) {
+            session.hook(bookmarksPage, "onCreateView", chain -> {
                 Object result = chain.proceed();
                 Object owner = chain.getThisObject();
-                Object pageObj = HookValues.readField(owner, "n");
-                if (pageObj instanceof android.app.Fragment) {
-                    Activity act = ((android.app.Fragment) pageObj).getActivity();
+                if (owner instanceof android.app.Fragment) {
+                    Activity act = ((android.app.Fragment) owner).getActivity();
                     if (act != null) {
                         act.getWindow().getDecorView().post(() -> {
-                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                            if (!act.isFinishing() && !act.isDestroyed()) {
+                                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
+                            }
                         });
                     }
                 }
                 return result;
-            }, CharSequence.class, int.class, int.class, int.class);
+            }, android.view.LayoutInflater.class, ViewGroup.class, Bundle.class);
         }
 
         session.log("BROWSER_COMBO_STATUS_BAR_ADAPTIVE_HOOKED");
+    }
+
+    /**
+     * Bookmark editing and folder pages are separate Activities from
+     * ComboViewActivity. They use the same legacy content-root insets code,
+     * so apply the edge-to-edge policy there as well when the keyboard opens.
+     */
+    private static void installNativeBrowserInputActivityInsets(HookSession session) {
+        String[] classNames = {
+                "com.android.browser.EditBookmarkPage",
+                "com.android.browser.AddBookmarkFolder",
+                "com.android.browser.bookmark.AddBookmarkFolderActivity",
+                "com.android.browser.bookmark.BookmarkFolderListActivity",
+                "com.android.browser.mynavigation.AddMyNavigationPage",
+                "com.android.browser.BrowserPreferencesPage"
+        };
+        for (String className : classNames) {
+            Class<?> activityClass = session.findOptionalClass(className);
+            if (activityClass == null) {
+                continue;
+            }
+            session.hook(activityClass, "onCreate", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity
+                        && ((Activity) owner).getClass().getName().equals(className)) {
+                    Activity act = (Activity) owner;
+                    act.getWindow().getDecorView().post(() -> {
+                        if (!act.isFinishing() && !act.isDestroyed()) {
+                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose
+                                    .applyNativeStatusBarAdaptive(act);
+                        }
+                    });
+                }
+                return result;
+            }, Bundle.class);
+
+            // onResume is commonly inherited, therefore the class-name guard
+            // is required to avoid touching unrelated browser windows when
+            // HookSession resolves the base declaration.
+            session.hook(activityClass, "onResume", chain -> {
+                Object result = chain.proceed();
+                Object owner = chain.getThisObject();
+                if (owner instanceof Activity
+                        && ((Activity) owner).getClass().getName().equals(className)) {
+                    Activity act = (Activity) owner;
+                    act.getWindow().getDecorView().post(() -> {
+                        if (!act.isFinishing() && !act.isDestroyed()) {
+                            dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose
+                                    .applyNativeStatusBarAdaptive(act);
+                        }
+                    });
+                }
+                return result;
+            });
+
+            Class<?> configurationClass = session.findOptionalClass(
+                    "android.content.res.Configuration");
+            if (configurationClass != null) {
+                session.hook(activityClass, "onConfigurationChanged", chain -> {
+                    Object result = chain.proceed();
+                    Object owner = chain.getThisObject();
+                    if (owner instanceof Activity
+                            && ((Activity) owner).getClass().getName().equals(className)) {
+                        Activity act = (Activity) owner;
+                        act.getWindow().getDecorView().post(() -> {
+                            if (!act.isFinishing() && !act.isDestroyed()) {
+                                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose
+                                        .applyNativeStatusBarAdaptive(act);
+                            }
+                        });
+                    }
+                    return result;
+                }, configurationClass);
+            }
+
+        }
+        session.log("BROWSER_INPUT_ACTIVITY_INSETS_HOOKED");
     }
 
     private static void installSkinActivityStatusBarAdaptive(HookSession session) {
@@ -1747,7 +1867,7 @@ public final class BrowserAdapter implements HostAdapter {
             session.hook(skinActivity, "onCreate", chain -> {
                 Object result = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isActivityNamed(owner, "SkinActivity")) {
                     Activity act = (Activity) owner;
                     act.getWindow().getDecorView().post(() -> {
                         if (!act.isFinishing() && !act.isDestroyed()) {
@@ -1760,24 +1880,30 @@ public final class BrowserAdapter implements HostAdapter {
 
             session.hook(skinActivity, "onResume", chain -> {
                 Object result = chain.proceed();
-                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onResume(chain.getThisObject());
+                if (isActivityNamed(chain.getThisObject(), "SkinActivity")) {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onResume(chain.getThisObject());
+                }
                 return result;
             });
 
             session.hook(skinActivity, "onPause", chain -> {
-                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onPause(chain.getThisObject());
+                if (isActivityNamed(chain.getThisObject(), "SkinActivity")) {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onPause(chain.getThisObject());
+                }
                 return chain.proceed();
             });
 
             session.hook(skinActivity, "onDestroy", chain -> {
-                dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onDestroy(chain.getThisObject());
+                if (isActivityNamed(chain.getThisObject(), "SkinActivity")) {
+                    dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onDestroy(chain.getThisObject());
+                }
                 return chain.proceed();
             });
 
             session.hook(skinActivity, "M", chain -> {
                 Object res = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isActivityNamed(owner, "SkinActivity")) {
                     dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.onSkinUpdated((Activity) owner);
                 }
                 return res;
@@ -1797,7 +1923,7 @@ public final class BrowserAdapter implements HostAdapter {
             session.hook(skinActivity, "onCreate", chain -> {
                 Object result = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isActivityNamed(owner, "SkinActivity")) {
                     Activity act = (Activity) owner;
                     act.getWindow().getDecorView().post(() -> {
                         dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
@@ -1809,7 +1935,7 @@ public final class BrowserAdapter implements HostAdapter {
             session.hook(skinActivity, "onResume", chain -> {
                 Object result = chain.proceed();
                 Object owner = chain.getThisObject();
-                if (owner instanceof Activity) {
+                if (isActivityNamed(owner, "SkinActivity")) {
                     Activity act = (Activity) owner;
                     act.getWindow().getDecorView().post(() -> {
                         dev.lackluster.redmagichelper.hook.browser.BrowserSettingsCompose.applyNativeStatusBarAdaptive(act);
