@@ -25,9 +25,12 @@ import android.view.WindowInsets;
 import android.view.WindowManager;
 
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -108,11 +111,15 @@ public final class BrowserAdapter implements HostAdapter {
             "active_container",
             "activeContent",
             "active_banner",
-            // Keep the delayed home information-flow page from showing under
-            // the bottom search overlay during the launch race.
+    };
+    private static final Set<String> SEARCH_CLEAN_ID_SET = new HashSet<>(
+            java.util.Arrays.asList(SEARCH_CLEAN_IDS));
+    private static final String[] INFO_FLOW_IDS = {
             "newsViewPager",
             "infoFlowTitle"
     };
+    private static final Set<String> INFO_FLOW_ID_SET = new HashSet<>(
+            java.util.Arrays.asList(INFO_FLOW_IDS));
 
     private static final String[] SEARCH_SHORTCUT_LABELS = {
             "红魔商城",
@@ -148,6 +155,25 @@ public final class BrowserAdapter implements HostAdapter {
     };
     private static final Set<String> HOME_HOT_NEWS_ID_SET = new HashSet<>(
             java.util.Arrays.asList(HOME_HOT_NEWS_IDS));
+    private static final String[] DRAMA_FEATURE_IDS = {
+            "djx_hot_drama_layout",
+            "djx_hot_drama_card1",
+            "djx_hot_drama_card2",
+            "djx_hot_drama_card3",
+            "djx_drama_home_title_layout",
+            "djx_drama_home_title_text",
+            "djx_drama_pager",
+            "djx_history_drama_layout",
+            "djx_grid_drama_recycler_view"
+    };
+    private static final Set<String> DRAMA_FEATURE_ID_SET = new HashSet<>(
+            java.util.Arrays.asList(DRAMA_FEATURE_IDS));
+    private static final String[] HOMEPAGE_SETTING_OPTION_IDS = {
+            "homepage_setting",
+            "main_setting"
+    };
+    private static final Set<String> HOMEPAGE_SETTING_OPTION_ID_SET = new HashSet<>(
+            java.util.Arrays.asList(HOMEPAGE_SETTING_OPTION_IDS));
 
 
     /**
@@ -193,16 +219,30 @@ public final class BrowserAdapter implements HostAdapter {
         }
         // Opening the browser directly on the bottom search tab must not let
         // HomeFirstPageHelper select the information-flow page for one frame.
-        // Install this guard even when the user only enabled default search
-        // and did not request permanent removal of the news/video tabs.
-        if (openSearch && !removeInfoTabs) {
+        if (!removeInfoTabs
+                && (openSearch || session.config().browserRemoveHomePageInfo())) {
             installInfoFlowGuard(session);
         }
+        if (removeInfoTabs || session.config().browserRemoveHomePageInfo()) {
+            installInfoFlowContentRemoval(session);
+        }
+        boolean removeHomeHotNews = session.config().browserRemoveHomePageInfo()
+                || session.config().browserRemoveHotWords()
+                || session.config().browserSlimMine();
+        boolean removeSearchHotNews = session.config().browserRemoveHotWords();
+        if (removeHomeHotNews || removeSearchHotNews) {
+            installHotNewsAdapterRemoval(session, removeHomeHotNews, removeSearchHotNews);
+        }
+        installBrowserContentViewRemoval(session);
+        // The OEM homepage destination and layout options are always removed;
+        // optional content cleanup below remains controlled by module settings.
+        installHomepageSettingsOptionRemoval(session);
         if (session.config().browserRemoveHomePageInfo()) {
             installHomePageInfoRemoval(session);
         }
         if (session.config().browserRemoveHomePageInfo()
-                || session.config().browserRemoveHotWords()) {
+                || session.config().browserRemoveHotWords()
+                || session.config().browserSlimMine()) {
             installHomeHotNewsRemoval(session);
         }
         if (session.config().browserSlimMine()) {
@@ -506,7 +546,8 @@ public final class BrowserAdapter implements HostAdapter {
             session.missing("view=BrowserLauncher decor");
             return;
         }
-        if (session.config().browserRemoveHomePageInfo()) {
+        if (session.config().browserRemoveHomePageInfo()
+                || session.config().browserRemoveHotWords()) {
             scheduleHomeHotNewsCleanup(session, decor);
         }
         selectBottomSearch(session, decor, 0);
@@ -671,27 +712,27 @@ public final class BrowserAdapter implements HostAdapter {
         Class<?> bottomBar = session.findClass("com.android.browser.BottomBar");
         session.hook(bottomBar, "c0", chain -> {
             Object result = chain.proceed();
-            hideBottomInfoViews(session, chain.getThisObject());
+            removeBottomInfoViews(session, chain.getThisObject());
             return result;
         });
         session.hook(bottomBar, "E0", chain -> {
             Object result = chain.proceed();
-            hideBottomInfoViews(session, chain.getThisObject());
+            removeBottomInfoViews(session, chain.getThisObject());
             return result;
         }, boolean.class, boolean.class);
         session.hook(bottomBar, "G0", chain -> {
             Object result = chain.proceed();
-            hideBottomInfoViews(session, chain.getThisObject());
+            removeBottomInfoViews(session, chain.getThisObject());
             return result;
         }, boolean.class, boolean.class);
         session.hook(bottomBar, "onWindowVisibilityChanged", chain -> {
             Object result = chain.proceed();
-            hideBottomInfoViews(session, chain.getThisObject());
+            removeBottomInfoViews(session, chain.getThisObject());
             return result;
         }, int.class);
         session.hook(bottomBar, "onLayout", chain -> {
             Object result = chain.proceed();
-            hideBottomInfoViews(session, chain.getThisObject());
+            removeBottomInfoViews(session, chain.getThisObject());
             return result;
         }, boolean.class, int.class, int.class, int.class, int.class);
 
@@ -708,7 +749,7 @@ public final class BrowserAdapter implements HostAdapter {
         }, View.class);
     }
 
-    private static void hideBottomInfoViews(HookSession session, Object owner) {
+    private static void removeBottomInfoViews(HookSession session, Object owner) {
         if (!(owner instanceof View)) {
             session.missing("view=com.android.browser.BottomBar");
             return;
@@ -718,19 +759,19 @@ public final class BrowserAdapter implements HostAdapter {
             for (String name : BOTTOM_HIDDEN_IDS) {
                 View view = HookValues.findView(root, session.packageName(), name);
                 if (view != null) {
-                    view.setVisibility(View.GONE);
+                    removeViewFromParent(view);
                 }
             }
             try {
                 Field fC = HookValues.findField(owner, "C");
                 if (fC != null) {
                     Object vC = fC.get(owner);
-                    if (vC instanceof View) ((View) vC).setVisibility(View.GONE);
+                    if (vC instanceof View) removeViewFromParent((View) vC);
                 }
                 Field fF = HookValues.findField(owner, "F");
                 if (fF != null) {
                     Object vF = fF.get(owner);
-                    if (vF instanceof View) ((View) vF).setVisibility(View.GONE);
+                    if (vF instanceof View) removeViewFromParent((View) vF);
                 }
             } catch (Throwable ignored) {
             }
@@ -776,6 +817,84 @@ public final class BrowserAdapter implements HostAdapter {
                 && HookValues.readField(holder, "K") != null;
     }
 
+    private static void installHomepageSettingsOptionRemoval(HookSession session) {
+        Class<?> settings = session.findOptionalClass(
+                "com.android.browser.settings.BrowserSettingActivity");
+        if (settings != null) {
+            session.hook(settings, "onCreate", chain -> {
+                Object result = chain.proceed();
+                scheduleHomepageSettingsOptionCleanup(session, chain.getThisObject());
+                return result;
+            }, Bundle.class);
+            session.hook(settings, "onResume", chain -> {
+                Object result = chain.proceed();
+                scheduleHomepageSettingsOptionCleanup(session, chain.getThisObject());
+                return result;
+            });
+        }
+
+    }
+
+    private static void scheduleHomepageSettingsOptionCleanup(HookSession session, Object owner) {
+        if (!(owner instanceof Activity)
+                || !"com.android.browser.settings.BrowserSettingActivity"
+                        .equals(owner.getClass().getName())) {
+            return;
+        }
+        try {
+            View decor = ((Activity) owner).getWindow().getDecorView();
+            Runnable cleanup = () -> removeHomepageSettingsOptions(session, decor);
+            decor.post(cleanup);
+            decor.postDelayed(cleanup, 160L);
+        } catch (Throwable ignored) {
+            // The settings activity may be finishing during a resume callback.
+        }
+    }
+
+    private static void removeHomepageSettingsOptions(HookSession session, View root) {
+        if (root == null) {
+            return;
+        }
+        boolean hidden = false;
+        for (String name : HOMEPAGE_SETTING_OPTION_IDS) {
+            View row = HookValues.findView(root, session.packageName(), name);
+            if (row != null) {
+                removeSettingRowAndAdjacentDivider(row);
+                hidden = true;
+            }
+        }
+        if (hidden) {
+            session.log("BROWSER_HOMEPAGE_SETTINGS_HIDDEN");
+        }
+    }
+
+    private static void removeSettingRowAndAdjacentDivider(View row) {
+        if (row == null) {
+            return;
+        }
+        if (!(row.getParent() instanceof ViewGroup)) {
+            return;
+        }
+        ViewGroup parent = (ViewGroup) row.getParent();
+        int index = parent.indexOfChild(row);
+        List<View> dividers = new ArrayList<>();
+        for (int siblingIndex : new int[]{index - 1, index + 1}) {
+            if (siblingIndex < 0 || siblingIndex >= parent.getChildCount()) {
+                continue;
+            }
+            View sibling = parent.getChildAt(siblingIndex);
+            String name = HookValues.resourceEntryName(sibling);
+            if (name != null && (name.startsWith("setting_separator")
+                    || name.startsWith("separator"))) {
+                dividers.add(sibling);
+            }
+        }
+        parent.removeView(row);
+        for (View divider : dividers) {
+            parent.removeView(divider);
+        }
+    }
+
     private static void installHomePageInfoRemoval(HookSession session) {
         // Remove the setting row itself, including its divider, so the user
         // cannot enter the OEM information-flow settings page.
@@ -786,49 +905,302 @@ public final class BrowserAdapter implements HostAdapter {
             Object owner = chain.getThisObject();
             if (owner instanceof Activity) {
                 View decor = ((Activity) owner).getWindow().getDecorView();
-                hideHomePageInfoSetting(session, decor);
+                removeHomePageInfoSetting(session, decor);
             }
             return result;
         }, Bundle.class);
 
-        // item_home_hot_news.xml uses a plain LinearLayout as its root, so a
-        // resource-specific View hook is more stable than relying on a
-        // particular home fragment or adapter method name.
-        Class<?> view = session.findClass("android.view.View");
-        session.hook(view, "onFinishInflate", chain -> {
-            Object result = chain.proceed();
-            Object owner = chain.getThisObject();
-            if (owner instanceof View) {
-                View v = (View) owner;
-                String resName = HookValues.resourceEntryName(v);
-                if ("homeHotNewsLayout".equals(resName)) {
-                    v.setVisibility(View.GONE);
-                    session.log("BROWSER_HOME_INFO_CONTENT_HIDDEN");
-                } else if ("switch_model".equals(resName)) {
-                    v.setVisibility(View.GONE);
-                    session.log("BROWSER_SWITCH_MODEL_CONTENT_HIDDEN");
+    }
+
+    /**
+     * Stop the information-flow feed at its data entry points. Removing the
+     * page views alone still lets NewsDataManager refresh channels and lets
+     * cached news repopulate NuSimpleNewsView after a return to the home page.
+     */
+    private static void installInfoFlowContentRemoval(HookSession session) {
+        Class<?> simpleInfoFlow = session.findOptionalClass(
+                "com.android.browser.ui.helper.SimpleInfoFlowHelper");
+        hookEmptyMethod(session, simpleInfoFlow, "h");
+        hookEmptyMethod(session, simpleInfoFlow, "j");
+        hookEmptyBusinessMethods(session, simpleInfoFlow, "h", "j");
+
+        Class<?> newsView = session.findOptionalClass(
+                "com.android.browser.ui.NuSimpleNewsView");
+        hookEmptyMethod(session, newsView, "setData", List.class);
+        if (newsView != null) {
+            hookEmptyMethod(session, newsView, "getData");
+            session.hook(newsView, "onClick", chain -> null, View.class);
+        }
+
+        Class<?> newsDataManager = session.findOptionalClass(
+                "com.android.browser.news.data.NewsDataManager");
+        hookEmptyMethod(session, newsDataManager, "H");
+        hookEmptyBusinessMethods(session, newsDataManager, "H");
+        Class<?> listener = session.findOptionalClass(
+                "com.android.browser.news.data.NewsDataManager$OnNewsDataSyncListener");
+        if (listener != null) {
+            hookEmptyMethod(session, newsDataManager, "E", listener);
+        }
+        session.log("BROWSER_INFO_FLOW_DATA_DISABLED");
+    }
+
+    /**
+     * Remove recommendation widgets before they attach to the browser view
+     * tree. The host can still construct unrelated settings and navigation
+     * views, while data adapters for the selected feature groups are also
+     * short-circuited below.
+     */
+    private static void installBrowserContentViewRemoval(HookSession session) {
+        if (!session.config().browserRemoveHomePageInfo()
+                && !session.config().browserRemoveHotWords()
+                && !session.config().browserRemoveInfoTabs()
+                && !session.config().browserSlimMine()) {
+            return;
+        }
+
+        HookSession.HookCallback addView = chain -> {
+            Object child = HookValues.arg(chain, 0);
+            if (child instanceof View
+                    && shouldRemoveBrowserFeatureView(session, (View) child)) {
+                return null;
+            }
+            return chain.proceed();
+        };
+        HookSession.HookCallback addViewInLayout = chain -> {
+            Object child = HookValues.arg(chain, 0);
+            if (child instanceof View
+                    && shouldRemoveBrowserFeatureView(session, (View) child)) {
+                return Boolean.FALSE;
+            }
+            return chain.proceed();
+        };
+
+        // Hook the central ViewGroup overloads. The simpler addView overloads
+        // delegate here, so hooking every overload adds work to every view
+        // attachment without improving coverage.
+        session.hook(ViewGroup.class, "addView", addView,
+                View.class, int.class, ViewGroup.LayoutParams.class);
+        session.hook(ViewGroup.class, "addViewInLayout", addViewInLayout,
+                View.class, int.class, ViewGroup.LayoutParams.class, boolean.class);
+        session.hook(ViewGroup.class, "attachViewToParent", addView,
+                View.class, int.class, ViewGroup.LayoutParams.class);
+        session.log("BROWSER_CONTENT_CONSTRUCTION_BLOCKED");
+    }
+
+    private static boolean shouldRemoveBrowserFeatureView(HookSession session, View view) {
+        try {
+            if (!session.packageName().equals(view.getContext().getPackageName())) {
+                return false;
+            }
+        } catch (Throwable ignored) {
+            return false;
+        }
+        String className = view.getClass().getName();
+        boolean removeHome = session.config().browserRemoveHomePageInfo()
+                || session.config().browserRemoveHotWords()
+                || session.config().browserSlimMine();
+        if (removeHome && className.endsWith("HotNewsViewForHome")) {
+            return true;
+        }
+        if (session.config().browserRemoveHotWords()
+                && (className.endsWith("HotNewsViewForSearch")
+                || className.endsWith("NuHotWordsView")
+                || className.endsWith("SearchKeyWordView"))) {
+            return true;
+        }
+        if (className.endsWith("BannerView")) {
+            Activity activity = findActivity(view.getContext(), null);
+            if (activity != null) {
+                String activityName = activity.getClass().getName();
+                if ((session.config().browserRemoveHomePageInfo()
+                        || session.config().browserSlimMine())
+                        && (activityName.endsWith("BrowserLauncher")
+                        || activityName.endsWith("BrowserActivity"))) {
+                    return true;
+                }
+                if (session.config().browserRemoveHotWords()
+                        && activityName.endsWith("SearchActivity")) {
+                    return true;
                 }
             }
-            return result;
-        });
-
-        // Catch home widgets assembled after inflation as the browser returns
-        // to its launcher activity. One shared, bounded cleanup pass handles
-        // the OEM's delayed content without polling the full decor tree every
-        // 100 ms for 1.5 seconds.
-        Class<?> launcher = session.findOptionalClass("com.android.browser.BrowserLauncher");
-        if (launcher != null) {
-            session.hook(launcher, "onCreate", chain -> {
-                Object result = chain.proceed();
-                scheduleActivityHomeCleanup(session, chain.getThisObject());
-                return result;
-            }, Bundle.class);
-            session.hook(launcher, "onResume", chain -> {
-                Object result = chain.proceed();
-                scheduleActivityHomeCleanup(session, chain.getThisObject());
-                return result;
-            });
         }
+        if (view.getId() == View.NO_ID) {
+            return false;
+        }
+        String resourceName = HookValues.resourceEntryName(view);
+        if (session.config().browserRemoveInfoTabs()
+                && HookValues.hasResourceId(view, session.packageName(), BOTTOM_HIDDEN_IDS)) {
+            return true;
+        }
+        if (session.config().browserSlimMine()) {
+            if (HookValues.hasResourceId(view, session.packageName(), MINE_HIDDEN_IDS)
+                    || HookValues.hasResourceId(view, session.packageName(), DRAMA_FEATURE_IDS)) {
+                return true;
+            }
+            String lowerClassName = className.toLowerCase(java.util.Locale.ROOT);
+            if (lowerClassName.contains(".djx.")
+                    || lowerClassName.startsWith("cn.nubia.drama.")) {
+                return true;
+            }
+        }
+        if (session.config().browserRemoveHomePageInfo()) {
+            if ("switch_model".equals(resourceName)
+                    || INFO_FLOW_ID_SET.contains(resourceName)) {
+                return true;
+            }
+        }
+        if (removeHome && HOME_HOT_NEWS_ID_SET.contains(resourceName)) {
+            return true;
+        }
+        if (session.config().browserRemoveHotWords()) {
+            if (SEARCH_CLEAN_ID_SET.contains(resourceName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void removeViewFromParent(View view) {
+        if (view != null && view.getParent() instanceof ViewGroup) {
+            ((ViewGroup) view.getParent()).removeView(view);
+        }
+    }
+
+    private static void hookEmptyMethod(
+            HookSession session,
+            Class<?> owner,
+            String methodName,
+            Class<?>... parameters
+    ) {
+        if (owner == null) {
+            return;
+        }
+        List<Method> methods = session.findMethods(owner, methodName, parameters);
+        if (methods.isEmpty()) {
+            session.hook(owner, methodName, chain -> null, parameters);
+            return;
+        }
+        for (Method method : methods) {
+            session.hook(method, chain -> emptyResult(method.getReturnType()));
+        }
+    }
+
+    private static void hookEmptyBusinessMethods(
+            HookSession session,
+            Class<?> owner,
+            String... excludedMethodNames
+    ) {
+        if (owner == null) {
+            return;
+        }
+        Set<String> excluded = new HashSet<>(java.util.Arrays.asList(excludedMethodNames));
+        for (Method method : owner.getDeclaredMethods()) {
+            if (Modifier.isAbstract(method.getModifiers())
+                    || Modifier.isStatic(method.getModifiers())
+                    || method.isBridge()
+                    || method.isSynthetic()
+                    || isViewLifecycleMethod(method.getName())) {
+                continue;
+            }
+
+            String name = method.getName();
+            if (excluded.contains(name)
+                    || "toString".equals(name)
+                    || "hashCode".equals(name)
+                    || "equals".equals(name)
+                    || "getContext".equals(name)
+                    || "getResources".equals(name)
+                    || "getId".equals(name)
+                    || "getParent".equals(name)
+                    || "getRootView".equals(name)
+                    || "getLayoutParams".equals(name)
+                    || "setLayoutParams".equals(name)
+                    || "getVisibility".equals(name)
+                    || "setVisibility".equals(name)
+                    || "getWindowToken".equals(name)
+                    || "dispatchTouchEvent".equals(name)
+                    || "onTouchEvent".equals(name)) {
+                continue;
+            }
+            session.hook(method, chain -> emptyResult(method.getReturnType()));
+        }
+    }
+
+    private static boolean isViewLifecycleMethod(String name) {
+        return "onAttachedToWindow".equals(name)
+                || "onDetachedFromWindow".equals(name)
+                || "onFinishInflate".equals(name)
+                || "onMeasure".equals(name)
+                || "onLayout".equals(name)
+                || "onDraw".equals(name)
+                || "onSizeChanged".equals(name)
+                || "onVisibilityChanged".equals(name)
+                || "onWindowVisibilityChanged".equals(name)
+                || "onConfigurationChanged".equals(name)
+                || "onRtlPropertiesChanged".equals(name)
+                || "onSaveInstanceState".equals(name)
+                || "onRestoreInstanceState".equals(name)
+                || "draw".equals(name)
+                || "dispatchDraw".equals(name) || "measure".equals(name)
+                || "layout".equals(name) || "invalidate".equals(name)
+                || "requestLayout".equals(name) || "setLayoutParams".equals(name);
+    }
+
+    private static Object emptyResult(Class<?> returnType) {
+        if (returnType == void.class || returnType == Void.class) {
+            return null;
+        }
+        if (returnType == boolean.class || returnType == Boolean.class) {
+            return Boolean.FALSE;
+        }
+        if (returnType == byte.class || returnType == Byte.class) {
+            return Byte.valueOf((byte) 0);
+        }
+        if (returnType == short.class || returnType == Short.class) {
+            return Short.valueOf((short) 0);
+        }
+        if (returnType == int.class || returnType == Integer.class) {
+            return Integer.valueOf(0);
+        }
+        if (returnType == long.class || returnType == Long.class) {
+            return Long.valueOf(0L);
+        }
+        if (returnType == float.class || returnType == Float.class) {
+            return Float.valueOf(0f);
+        }
+        if (returnType == double.class || returnType == Double.class) {
+            return Double.valueOf(0d);
+        }
+        if (returnType == char.class || returnType == Character.class) {
+            return Character.valueOf('\0');
+        }
+        if (returnType == String.class) {
+            return "";
+        }
+        if (returnType.isArray()) {
+            return Array.newInstance(returnType.getComponentType(), 0);
+        }
+        if (java.util.Collection.class.isAssignableFrom(returnType)
+                && returnType.isAssignableFrom(ArrayList.class)) {
+            return new ArrayList<>();
+        }
+        if (Iterable.class.isAssignableFrom(returnType)
+                && returnType.isAssignableFrom(ArrayList.class)) {
+            return new ArrayList<>();
+        }
+        if (Map.class.isAssignableFrom(returnType)
+                && returnType.isAssignableFrom(HashMap.class)) {
+            return new HashMap<>();
+        }
+        if (Set.class.isAssignableFrom(returnType)
+                && returnType.isAssignableFrom(HashSet.class)) {
+            return new HashSet<>();
+        }
+        if (List.class.isAssignableFrom(returnType)
+                && returnType.isAssignableFrom(ArrayList.class)) {
+            return new ArrayList<>();
+        }
+        return null;
     }
 
     private static void scheduleActivityHomeCleanup(HookSession session, Object owner) {
@@ -836,25 +1208,29 @@ public final class BrowserAdapter implements HostAdapter {
                 && "com.android.browser.BrowserLauncher".equals(owner.getClass().getName())) {
             try {
                 View decor = ((Activity) owner).getWindow().getDecorView();
-                scheduleHomeHotNewsCleanup(session, decor);
+                if (session.config().browserRemoveHomePageInfo()
+                        || session.config().browserRemoveHotWords()
+                        || session.config().browserSlimMine()) {
+                    scheduleHomeHotNewsCleanup(session, decor);
+                }
             } catch (Throwable ignored) {
                 // The activity can be tearing down while the callback runs.
             }
         }
     }
 
-    private static void hideHomePageInfoSetting(HookSession session, View root) {
+    private static void removeHomePageInfoSetting(HookSession session, View root) {
         if (root == null) {
             return;
         }
         View row = HookValues.findView(root, session.packageName(), "infoflow_setting");
         if (row != null) {
-            row.setVisibility(View.GONE);
+            removeSettingRowAndAdjacentDivider(row);
         }
         View divider = HookValues.findView(
                 root, session.packageName(), "setting_separator_space7");
         if (divider != null) {
-            divider.setVisibility(View.GONE);
+            removeViewFromParent(divider);
         }
         if (row != null || divider != null) {
             session.log("BROWSER_HOME_INFO_SETTING_HIDDEN");
@@ -2098,6 +2474,26 @@ public final class BrowserAdapter implements HostAdapter {
     }
 
     private static void installMineSlimming(HookSession session) {
+        installDramaLaunchRemoval(session);
+
+        // These helpers are the data and click entry points for the mine-page
+        // recommendations. Replacing them with empty results stops network,
+        // adapter, and item-click work before the corresponding views attach.
+        Class<?> dramaHelper = session.findOptionalClass("cn.nubia.drama.DramaHelper");
+        hookEmptyBusinessMethods(session, dramaHelper);
+
+        Class<?> appIconHelper = session.findOptionalClass(
+                "cn.nubia.usercenter.app.AppIconHelper");
+        hookEmptyBusinessMethods(session, appIconHelper);
+
+        Class<?> serviceHelper = session.findOptionalClass(
+                "cn.nubia.usercenter.texticon.service.CommonServiceHelper");
+        hookEmptyBusinessMethods(session, serviceHelper);
+
+        Class<?> bannerHelper = session.findOptionalClass(
+                "cn.nubia.usercenter.banner.BannerHelper");
+        hookEmptyBusinessMethods(session, bannerHelper);
+
         Class<?> mineView = session.findClass("cn.nubia.usercenter.view.MineView");
         session.hook(mineView, "n", chain -> {
             Object result = chain.proceed();
@@ -2118,6 +2514,40 @@ public final class BrowserAdapter implements HostAdapter {
             enforceMinePolicy(session, chain.getThisObject(), true);
             return result;
         });
+    }
+
+    private static void installDramaLaunchRemoval(HookSession session) {
+        HookSession.HookCallback blockDramaLaunch = chain -> {
+            Object value = HookValues.arg(chain, 0);
+            if (isBrowserDramaIntent(value)) {
+                return null;
+            }
+            return chain.proceed();
+        };
+        session.hook(Activity.class, "startActivity", blockDramaLaunch, Intent.class);
+        session.hook(Activity.class, "startActivity", blockDramaLaunch,
+                Intent.class, Bundle.class);
+        session.hook(Activity.class, "startActivityForResult", blockDramaLaunch,
+                Intent.class, int.class);
+        session.hook(Activity.class, "startActivityForResult", blockDramaLaunch,
+                Intent.class, int.class, Bundle.class);
+        session.log("BROWSER_DRAMA_ENTRY_POINTS_DISABLED");
+    }
+
+    private static boolean isBrowserDramaIntent(Object value) {
+        if (!(value instanceof Intent)) {
+            return false;
+        }
+        android.content.ComponentName component = ((Intent) value).getComponent();
+        if (component == null) {
+            return false;
+        }
+        String className = component.getClassName();
+        if (className == null) {
+            return false;
+        }
+        String normalized = className.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("drama") || normalized.contains(".djx.");
     }
 
     private static void enforceMinePolicy(
@@ -2144,7 +2574,7 @@ public final class BrowserAdapter implements HostAdapter {
                 if (view == null) {
                     session.missing("resource=id/" + name);
                 } else {
-                    view.setVisibility(View.GONE);
+                    removeViewFromParent(view);
                 }
             }
             if (stopBanner) {
@@ -2225,88 +2655,23 @@ public final class BrowserAdapter implements HostAdapter {
 
     private static void installSearchCleaning(HookSession session) {
         installSearchAdRemoval(session);
-        // The search page can recreate the title row after all view IDs have
-        // already been cleaned. Remove the complete block at the moment its
-        // text is bound, so only an orphaned “今日热榜” label cannot remain.
-        session.hook(TextView.class, "setText", chain -> {
-            Object result = chain.proceed();
-            Object owner = chain.getThisObject();
-            if (owner instanceof TextView) {
-                CharSequence textCs = ((TextView) owner).getText();
-                String text = textCs == null ? "" : textCs.toString();
-                if (isSearchHotNewsLabel(text)) {
-                    hideSearchHotNewsBlock((View) owner);
-                } else if (isSearchActiveLabel(text)) {
-                    hideActiveBlock((View) owner);
-                }
-            }
-            return result;
-        }, CharSequence.class);
-        session.hook(TextView.class, "setText", chain -> {
-            Object result = chain.proceed();
-            Object owner = chain.getThisObject();
-            if (owner instanceof TextView) {
-                CharSequence textCs = ((TextView) owner).getText();
-                String text = textCs == null ? "" : textCs.toString();
-                if (isSearchHotNewsLabel(text)) {
-                    hideSearchHotNewsBlock((View) owner);
-                } else if (isSearchActiveLabel(text)) {
-                    hideActiveBlock((View) owner);
-                }
-            }
-            return result;
-        }, int.class);
-        session.hook(ImageView.class, "setVisibility", chain -> {
-            Object owner = chain.getThisObject();
-            if (owner instanceof View
-                    && "ivAction".equals(HookValues.resourceEntryName((View) owner))) {
-                return HookValues.proceedWithArgument(chain, 0, View.GONE);
-            }
-            return chain.proceed();
-        }, int.class);
         Class<?> bannerView = session.findClass("com.android.browser.view.BannerView");
-        final Class<?> bannerViewType = bannerView;
-        session.hook(bannerView, "onAttachedToWindow", chain -> {
-            Object result = chain.proceed();
-            if (bannerViewType != null && bannerViewType.isInstance(chain.getThisObject())
-                    && chain.getThisObject() instanceof View) {
-                View v = (View) chain.getThisObject();
-                makeEmptyPreserveHeight(v);
-            }
-            return result;
-        });
-        session.hook(bannerView, "onLayout", chain -> {
-            Object result = chain.proceed();
-            if (bannerViewType != null && bannerViewType.isInstance(chain.getThisObject())
-                    && chain.getThisObject() instanceof View) {
-                View v = (View) chain.getThisObject();
-                makeEmptyPreserveHeight(v);
-            }
-            return result;
-        }, boolean.class, int.class, int.class, int.class, int.class);
-        session.hook(bannerView, "setVisibility", chain -> {
-            if (bannerViewType != null && bannerViewType.isInstance(chain.getThisObject())) {
-                return HookValues.proceedWithArgument(chain, 0, View.INVISIBLE);
-            }
-            return chain.proceed();
-        }, int.class);
+        hookEmptyMethod(session, bannerView, "setData", List.class);
         Class<?> seekView = session.findClass("com.android.browser.ui.SeekView");
         final Class<?> seekViewType = seekView;
         session.hook(seekView, "onAttachedToWindow", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (seekViewType != null && seekViewType.isInstance(owner)
-                    && owner instanceof View) {
-                cleanSearchViews(session, (View) owner);
+            if (seekViewType != null && seekViewType.isInstance(owner)) {
+                removeSearchFeatureViews(session, owner);
             }
             return result;
         });
         session.hook(seekView, "onLayout", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (seekViewType != null && seekViewType.isInstance(owner)
-                    && owner instanceof View) {
-                cleanSearchViews(session, (View) owner);
+            if (seekViewType != null && seekViewType.isInstance(owner)) {
+                removeSearchFeatureViews(session, owner);
             }
             return result;
         }, boolean.class, int.class, int.class, int.class, int.class);
@@ -2316,11 +2681,9 @@ public final class BrowserAdapter implements HostAdapter {
             Object owner = chain.getThisObject();
             if (owner instanceof Activity) {
                 View decor = ((Activity) owner).getWindow().getDecorView();
-                cleanSearchViews(session, decor);
+                removeSearchFeatureViews(session, decor);
                 scheduleSearchDynamicCleanup(session, decor);
-                if (session.config().browserRemoveHomePageInfo()) {
-                    scheduleHomeHotNewsCleanup(session, decor);
-                }
+                scheduleHomeHotNewsCleanup(session, decor);
             }
             return result;
         }, Bundle.class);
@@ -2331,40 +2694,34 @@ public final class BrowserAdapter implements HostAdapter {
         session.hook(searchMain, "onFinishInflate", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (searchMainType != null
-                    && searchMainType.isInstance(owner)
-                    && owner instanceof View) {
-                cleanSearchViews(session, (View) owner);
+            if (searchMainType != null && searchMainType.isInstance(owner)) {
+                removeSearchFeatureViews(session, owner);
             }
             return result;
         });
         session.hook(searchMain, "onAttachedToWindow", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (searchMainType != null
-                    && searchMainType.isInstance(owner)
-                    && owner instanceof View) {
-                hideSearchDynamicParts(session, owner);
+            if (searchMainType != null && searchMainType.isInstance(owner)) {
+                removeSearchFeatureViews(session, owner);
             }
             return result;
         });
         session.hook(searchMain, "onLayout", chain -> {
             Object result = chain.proceed();
             Object owner = chain.getThisObject();
-            if (searchMainType != null
-                    && searchMainType.isInstance(owner)
-                    && owner instanceof View) {
-                hideSearchDynamicParts(session, owner);
+            if (searchMainType != null && searchMainType.isInstance(owner)) {
+                removeSearchFeatureViews(session, owner);
             }
             return result;
         }, boolean.class, int.class, int.class, int.class, int.class);
-        // Intercept r(Context) to hide dynamic parts immediately after setup
+        // Remove data-fed content immediately after SearchMainPartView setup.
         session.hook(searchMain, "r", chain -> {
             Object result = chain.proceed();
-            hideSearchDynamicParts(session, chain.getThisObject());
+            removeSearchFeatureViews(session, chain.getThisObject());
             return result;
         }, Context.class);
-        // q() builds the tabs list (this.o). Clear this.o and return null so no tabs exist.
+        // Keep the search page's tab list empty before its adapter is built.
         session.hook(searchMain, "q", chain -> {
             Object owner = chain.getThisObject();
             Object o = HookValues.readField(owner, "o");
@@ -2373,18 +2730,14 @@ public final class BrowserAdapter implements HostAdapter {
             }
             return null;
         });
-        // p(Context) creates the ViewPager adapter. Returning null prevents ViewPager from having an adapter.
+        // Returning an empty adapter result prevents the hot-list pages from
+        // being constructed.
         session.hook(searchMain, "p", chain -> null, Context.class);
         // Suppress search_hotrank (今日热榜) and home_hotword tabs from ever being constructed.
         session.hook(searchMain, "v", chain -> Boolean.FALSE);
         session.hook(searchMain, "w", chain -> Boolean.FALSE);
-        // B() repopulates NuHotWordsView from CacheManager every time the
-        // search page is refreshed.  Suppressing the call prevents a hidden
-        // view from being re-enabled after the first layout.
-        session.hook(searchMain, "B", chain -> {
-            hideSearchDynamicParts(session, chain.getThisObject());
-            return null;
-        });
+        // B() repopulates NuHotWordsView from CacheManager on refresh.
+        hookEmptyMethod(session, searchMain, "B");
         session.hook(searchMain, "setSearchSupposeData", chain -> null, List.class);
 
         Class<?> dataCenter = session.findOptionalClass("com.android.browser.datacenter.DataCenter");
@@ -2410,107 +2763,48 @@ public final class BrowserAdapter implements HostAdapter {
         }
 
         Class<?> hotWords = session.findClass("com.android.browser.ui.NuHotWordsView");
-        final Class<?> hotWordsType = hotWords;
-        session.hook(hotWords, "f", chain -> {
-            hideSearchDynamicParts(session, chain.getThisObject());
-            return null;
-        }, List.class);
-        session.hook(hotWords, "setVisibility", chain -> {
-            if (hotWordsType == null
-                    || !hotWordsType.isInstance(chain.getThisObject())) {
-                return chain.proceed();
-            }
-            return HookValues.proceedWithArgument(chain, 0, View.GONE);
-        }, int.class);
-        session.hook(hotWords, "onAttachedToWindow", chain -> {
-            Object result = chain.proceed();
-            if (hotWordsType != null
-                    && hotWordsType.isInstance(chain.getThisObject())) {
-                hideSearchDynamicParts(session, chain.getThisObject());
-            }
-            return result;
-        });
+        hookEmptyMethod(session, hotWords, "f", List.class);
 
         Class<?> hotNews = session.findClass(
                 "com.android.browser.view.hotnews.HotNewsViewForSearch");
-        final Class<?> hotNewsType = hotNews;
-        // g() starts the NuContentApi request for today's hot list.
-        session.hook(hotNews, "g", chain -> {
-            hideSearchDynamicParts(session, chain.getThisObject());
-            return null;
-        });
-        // setData() posts a NuUIRunnable, so blocking only the network entry
-        // is insufficient when cached data arrives later.
-        session.hook(hotNews, "setData", chain -> {
-            hideSearchDynamicParts(session, chain.getThisObject());
-            return null;
-        }, List.class);
-        session.hook(hotNews, "e", chain -> {
-            Object result = chain.proceed();
-            if (hotNewsType != null
-                    && hotNewsType.isInstance(chain.getThisObject())) {
-                hideSearchDynamicParts(session, chain.getThisObject());
-                if (chain.getThisObject() instanceof View) {
-                    ((View) chain.getThisObject()).setVisibility(View.GONE);
-                }
-            }
-            return result;
-        });
-        session.hook(hotNews, "setHasView", chain -> {
-            if (hotNewsType == null
-                    || !hotNewsType.isInstance(chain.getThisObject())) {
-                return chain.proceed();
-            }
-            return HookValues.proceedWithArgument(chain, 0, false);
-        }, boolean.class);
-        session.hook(hotNews, "h", chain -> {
-            if (hotNewsType == null
-                    || !hotNewsType.isInstance(chain.getThisObject())) {
-                return chain.proceed();
-            }
-            return HookValues.proceedWithArgument(chain, 0, View.GONE);
-        }, int.class);
-        session.hook(hotNews, "onAttachedToWindow", chain -> {
-            Object result = chain.proceed();
-            if (hotNewsType != null
-                    && hotNewsType.isInstance(chain.getThisObject())) {
-                hideSearchDynamicParts(session, chain.getThisObject());
-                if (chain.getThisObject() instanceof View) {
-                    ((View) chain.getThisObject()).setVisibility(View.GONE);
-                }
-            }
-            return result;
-        });
-        session.hook(hotNews, "onLayout", chain -> {
-            Object result = chain.proceed();
-            if (hotNewsType != null
-                    && hotNewsType.isInstance(chain.getThisObject())
-                    && chain.getThisObject() instanceof View) {
-                ((View) chain.getThisObject()).setVisibility(View.GONE);
-            }
-            return result;
-        }, boolean.class, int.class, int.class, int.class, int.class);
-        session.hook(hotNews, "setVisibility", chain -> {
-            if (hotNewsType != null
-                    && hotNewsType.isInstance(chain.getThisObject())) {
-                return HookValues.proceedWithArgument(chain, 0, View.GONE);
-            }
-            return chain.proceed();
-        }, int.class);
+        // Replace the feature view's business methods with empty results. This
+        // blocks g()/setData()/cached callbacks before they create rows.
+        hookEmptyBusinessMethods(session, hotNews, "g", "setData", "e", "setHasView", "h");
+        hookEmptyMethod(session, hotNews, "g");
+        hookEmptyMethod(session, hotNews, "setData", List.class);
+        hookEmptyMethod(session, hotNews, "e");
+        hookEmptyMethod(session, hotNews, "setHasView", boolean.class);
+        hookEmptyMethod(session, hotNews, "h", int.class);
 
         Class<?> searchKeyWordView = session.findClass(
                 "com.android.browser.view.searchnews.SearchKeyWordView");
-        final Class<?> searchKeyWordViewType = searchKeyWordView;
-        session.hook(searchKeyWordView, "setVisibility", chain -> {
-            // setVisibility is inherited from View. HookSession can resolve
-            // inherited methods, so guard the receiver to avoid hiding every
-            // View in the browser process.
-            if (searchKeyWordViewType == null
-                    || !searchKeyWordViewType.isInstance(chain.getThisObject())) {
-                return chain.proceed();
+        hookEmptyBusinessMethods(session, searchKeyWordView);
+    }
+
+    private static void installHotNewsAdapterRemoval(
+            HookSession session,
+            boolean removeHome,
+            boolean removeSearch
+    ) {
+        if (removeHome) {
+            Class<?> homeAdapter = session.findOptionalClass(
+                    "com.android.browser.view.hotnews.HotNewsAdapter");
+            if (homeAdapter != null) {
+                session.hook(homeAdapter, "getItemCount", chain -> 0);
+                hookEmptyMethod(session, homeAdapter, "j", List.class);
+                hookEmptyMethod(session, homeAdapter, "setOnItemClickCallback");
             }
-            return HookValues.proceedWithArgument(chain, 0, View.GONE);
-        }, int.class);
+        }
+
+        if (removeSearch) {
+            Class<?> searchAdapter = session.findOptionalClass(
+                    "com.android.browser.view.hotnews.HotNewsAdapterForSearch");
+            if (searchAdapter != null) {
+                session.hook(searchAdapter, "getItemCount", chain -> 0);
+                hookEmptyMethod(session, searchAdapter, "g", List.class);
+            }
+        }
+        session.log("BROWSER_HOT_NEWS_ADAPTERS_EMPTY");
     }
 
     /**
@@ -2522,27 +2816,120 @@ public final class BrowserAdapter implements HostAdapter {
     private static void installHomeHotNewsRemoval(HookSession session) {
         Class<?> hotNewsHome = session.findClass(
                 "com.android.browser.view.hotnews.HotNewsViewForHome");
-        final Class<?> hotNewsHomeType = hotNewsHome;
-        session.hook(hotNewsHome, "onAttachedToWindow", chain -> {
+        hookEmptyBusinessMethods(session, hotNewsHome);
+
+        Class<?> baseHotNews = session.findOptionalClass(
+                "com.android.browser.view.hotnews.BaseHotNewsView");
+        hookEmptyMethod(session, baseHotNews, "d", Context.class);
+        hookEmptyMethod(session, baseHotNews, "e");
+        hookEmptyMethod(session, baseHotNews, "setData", List.class);
+        Class<?> callback = session.findOptionalClass("kotlin.jvm.functions.Function1");
+        if (callback != null) {
+            hookEmptyMethod(session, baseHotNews, "setOnItemClickCallback", callback);
+        }
+
+        // Drop Active/recommendation rows at bind time so adapters cannot
+        // reinsert them after the view-tree construction hook has run.
+        session.hook(TextView.class, "setText", chain -> {
             Object result = chain.proceed();
-            if (hotNewsHomeType != null
-                    && hotNewsHomeType.isInstance(chain.getThisObject())) {
-                hideSearchDynamicParts(session, chain.getThisObject());
-            }
+            removeBrowserHotContentLabel(session, chain.getThisObject());
             return result;
-        });
-        session.hook(hotNewsHome, "setVisibility", chain -> {
-            if (hotNewsHomeType == null
-                    || !hotNewsHomeType.isInstance(chain.getThisObject())) {
-                return chain.proceed();
-            }
-            return HookValues.proceedWithArgument(chain, 0, View.GONE);
+        }, CharSequence.class);
+        session.hook(TextView.class, "setText", chain -> {
+            Object result = chain.proceed();
+            removeBrowserHotContentLabel(session, chain.getThisObject());
+            return result;
         }, int.class);
-        session.hook(hotNewsHome, "setData", chain -> {
-            hideSearchDynamicParts(session, chain.getThisObject());
-            return null;
-        }, List.class);
-        session.log("BROWSER_HOME_HOT_NEWS_DISABLED");
+
+        // Catch home widgets assembled after inflation and again when users
+        // return from another page. One shared, bounded cleanup pass handles
+        // delayed content without continuously traversing the decor tree.
+        Class<?> launcher = session.findOptionalClass("com.android.browser.BrowserLauncher");
+        if (launcher != null) {
+            session.hook(launcher, "onCreate", chain -> {
+                Object result = chain.proceed();
+                scheduleActivityHomeCleanup(session, chain.getThisObject());
+                return result;
+            }, Bundle.class);
+            session.hook(launcher, "onResume", chain -> {
+                Object result = chain.proceed();
+                scheduleActivityHomeCleanup(session, chain.getThisObject());
+                return result;
+            });
+        }
+        session.log("BROWSER_HOME_HOT_NEWS_CONSTRUCTION_BLOCKED");
+    }
+
+    private static void removeBrowserHotContentLabel(HookSession session, Object owner) {
+        if (!(owner instanceof TextView)) {
+            return;
+        }
+        TextView textView = (TextView) owner;
+        CharSequence value = textView.getText();
+        String text = value == null ? "" : value.toString();
+        boolean hotContentLabel = isBrowserHotContentLabel(text);
+        boolean activeLabel = isSearchActiveLabel(text);
+        if (!hotContentLabel && !activeLabel) {
+            return;
+        }
+
+        Activity activity = findActivity(textView.getContext(), null);
+        if (activity == null) {
+            return;
+        }
+        String activityName = activity.getClass().getName();
+        if (activityName.contains("SearchActivity")) {
+            if (!session.config().browserRemoveHotWords()) {
+                return;
+            }
+        } else if (activityName.contains("SettingActivity")
+                || activityName.contains("SkinActivity")) {
+            return;
+        } else if (!session.config().browserRemoveHomePageInfo()
+                && !session.config().browserRemoveHotWords()
+                && !session.config().browserSlimMine()) {
+            return;
+        }
+
+        HookValues.runOnMain(textView, () -> {
+            if (hotContentLabel) {
+                removeSearchHotNewsBlock(textView);
+            } else {
+                removeActiveBlock(textView);
+            }
+        });
+    }
+
+    private static boolean isBrowserHotContentLabel(String text) {
+        if (text == null) {
+            return false;
+        }
+        String trimmed = text.trim();
+        return isBrowserRecommendationLabel(trimmed)
+                || "今日热榜".equals(trimmed)
+                || "今日热点".equals(trimmed)
+                || "Hot News".equalsIgnoreCase(trimmed)
+                || "搜索热榜".equals(trimmed);
+    }
+
+    private static boolean isBrowserRecommendationLabel(String text) {
+        if (text == null) {
+            return false;
+        }
+        String trimmed = text.trim();
+        return trimmed.contains("热门短剧")
+                || "短剧推荐".equals(trimmed)
+                || "资讯".equals(trimmed)
+                || trimmed.contains("热门资讯")
+                || trimmed.contains("推荐资讯")
+                || trimmed.contains("资讯推荐")
+                || trimmed.contains("今日资讯")
+                || trimmed.contains("热点资讯")
+                || "热搜".equals(trimmed)
+                || "热搜榜".equals(trimmed)
+                || "热搜榜单".equals(trimmed)
+                || "热门搜索".equals(trimmed)
+                || "猜你想搜".equals(trimmed);
     }
 
     /** Block the browser's search suggestion ad requests and hide rows that
@@ -2902,38 +3289,33 @@ public final class BrowserAdapter implements HostAdapter {
         }
     }
 
-    private static void cleanSearchViews(HookSession session, View root) {
-        if (root == null) {
+    private static void removeSearchFeatureViews(HookSession session, Object owner) {
+        if (!(owner instanceof View)) {
             return;
         }
+        View root = (View) owner;
         HookValues.runOnMain(root, () -> {
-            for (String name : SEARCH_CLEAN_IDS) {
-                View view = HookValues.findView(root, session.packageName(), name);
-                if (view != null) {
-                    if (name.startsWith("active") || "banner_view".equals(name)) {
-                        makeEmptyPreserveHeight(view);
-                    } else {
-                        if (view.getVisibility() != View.GONE) {
-                            view.setVisibility(View.GONE);
-                        }
-                        LayoutParams lp = view.getLayoutParams();
-                        if (lp != null && lp.height > 0) {
-                            lp.height = 0;
-                            view.setLayoutParams(lp);
-                        }
-                        if ("searchHisSlidingTabLayout".equals(name) && view.getParent() instanceof View) {
-                            View parent = (View) view.getParent();
-                            parent.setVisibility(View.GONE);
-                            LayoutParams plp = parent.getLayoutParams();
-                            if (plp != null && plp.height > 0) {
-                                plp.height = 0;
-                                parent.setLayoutParams(plp);
-                            }
-                        }
-                    }
-                }
-            }
+            removeConfiguredBrowserFeatureViews(session, root);
         });
+    }
+
+    private static void removeConfiguredBrowserFeatureViews(
+            HookSession session,
+            View view
+    ) {
+        if (view == null) {
+            return;
+        }
+        if (shouldRemoveBrowserFeatureView(session, view)) {
+            removeViewFromParent(view);
+            return;
+        }
+        if (view instanceof ViewGroup) {
+            ViewGroup group = (ViewGroup) view;
+            for (int index = group.getChildCount() - 1; index >= 0; index--) {
+                removeConfiguredBrowserFeatureViews(session, group.getChildAt(index));
+            }
+        }
     }
 
     private static boolean isSearchHotNewsLabel(String text) {
@@ -2957,18 +3339,12 @@ public final class BrowserAdapter implements HostAdapter {
                 || "今日热点 Active".equals(trimmed);
     }
 
-    private static void hideSearchHotNewsBlock(View owner) {
+    private static void removeSearchHotNewsBlock(View owner) {
         if (owner == null) {
             return;
         }
         View current = owner;
         for (int level = 0; level < 3 && current != null; level++) {
-            current.setVisibility(View.GONE);
-            LayoutParams lp = current.getLayoutParams();
-            if (lp != null && lp.height > 0) {
-                lp.height = 0;
-                current.setLayoutParams(lp);
-            }
             if (!(current.getParent() instanceof View)) {
                 break;
             }
@@ -2979,148 +3355,81 @@ public final class BrowserAdapter implements HostAdapter {
             }
             current = parent;
         }
+        removeViewFromParent(current);
     }
 
-    private static void hideActiveBlock(View owner) {
+    private static void removeActiveBlock(View owner) {
         if (owner == null) {
             return;
         }
         View current = owner;
-        for (int level = 0; level < 2 && current.getParent() instanceof View; level++) {
-            current = (View) current.getParent();
-        }
-        makeEmptyPreserveHeight(current);
-    }
-
-    private static void makeEmptyPreserveHeight(View view) {
-        if (view == null) {
-            return;
-        }
-        try {
-            int currentHeight = view.getHeight();
-            if (currentHeight > 0) {
-                ViewGroup.LayoutParams lp = view.getLayoutParams();
-                if (lp != null && lp.height != currentHeight) {
-                    lp.height = currentHeight;
-                    view.setLayoutParams(lp);
-                }
-            } else {
-                view.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
-                    @Override
-                    public void onLayoutChange(View v, int left, int top, int right, int bottom,
-                            int oldLeft, int oldTop, int oldRight, int oldBottom) {
-                        int h = bottom - top;
-                        if (h > 0) {
-                            ViewGroup.LayoutParams lp = v.getLayoutParams();
-                            if (lp != null && lp.height != h) {
-                                lp.height = h;
-                                v.setLayoutParams(lp);
-                            }
-                        }
-                    }
-                });
+        View nearestParent = owner;
+        for (int level = 0; level < 6; level++) {
+            String resourceName = HookValues.resourceEntryName(current);
+            String className = current.getClass().getName();
+            if (isActiveFeatureResource(resourceName)
+                    || className.endsWith("HotNewsViewForHome")
+                    || className.endsWith("HotNewsViewForSearch")
+                    || className.endsWith("BannerView")) {
+                removeViewFromParent(current);
+                return;
             }
-            clearContentRecursively(view);
-        } catch (Throwable ignored) {
-        }
-    }
-
-    private static void clearContentRecursively(View view) {
-        if (view == null) {
-            return;
-        }
-        if (view.getVisibility() != View.INVISIBLE) {
-            view.setVisibility(View.INVISIBLE);
-        }
-        view.setAlpha(0f);
-        view.setBackground(null);
-        view.setClickable(false);
-        view.setFocusable(false);
-        view.setEnabled(false);
-        view.setOnClickListener(null);
-        if (view instanceof ViewGroup) {
-            ViewGroup vg = (ViewGroup) view;
-            vg.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
-            for (int i = 0; i < vg.getChildCount(); i++) {
-                clearContentRecursively(vg.getChildAt(i));
+            if (!(current.getParent() instanceof View)) {
+                break;
+            }
+            View parent = (View) current.getParent();
+            if (isBrowserFeatureContentBoundary(parent)) {
+                removeViewFromParent(current);
+                return;
+            }
+            current = parent;
+            if (level == 0) {
+                nearestParent = current;
             }
         }
+        // A label without a usable resource ID still loses its own row. The
+        // bounded fallback avoids accidentally detaching the whole page root.
+        removeViewFromParent(nearestParent);
+    }
+
+    private static boolean isActiveFeatureResource(String resourceName) {
+        return resourceName != null
+                && ("active".equals(resourceName)
+                || resourceName.startsWith("active_")
+                || "activeView".equals(resourceName)
+                || "activeLayout".equals(resourceName)
+                || "activeNews".equals(resourceName)
+                || "active_container".equals(resourceName)
+                || "activeContent".equals(resourceName)
+                || "active_banner".equals(resourceName));
+    }
+
+    private static boolean isBrowserFeatureContentBoundary(View view) {
+        if (view == null) {
+            return false;
+        }
+        if (view.getId() == android.R.id.content) {
+            return true;
+        }
+        String name = HookValues.resourceEntryName(view);
+        return "searchMainPartView".equals(name)
+                || "newsViewPager".equals(name)
+                || "home_root_view".equals(name);
     }
 
     private static void scheduleSearchDynamicCleanup(HookSession session, View root) {
         int modes = CLEANUP_SEARCH;
-        if (session.config().browserRemoveHomePageInfo()) {
+        if (session.config().browserRemoveHomePageInfo()
+                || session.config().browserRemoveHotWords()) {
             modes |= CLEANUP_HOME;
         }
         scheduleDynamicCleanup(session, root, modes);
     }
 
-    private static void hideSearchDynamicParts(HookSession session, Object owner) {
-        if (!(owner instanceof View)) {
-            return;
-        }
-        View root = (View) owner;
-        cleanSearchViews(session, root);
-        Object hotWords = HookValues.readField(owner, "r");
-        if (hotWords instanceof View) {
-            ((View) hotWords).setVisibility(View.GONE);
-            LayoutParams lp = ((View) hotWords).getLayoutParams();
-            if (lp != null && lp.height > 0) {
-                lp.height = 0;
-                ((View) hotWords).setLayoutParams(lp);
-            }
-        }
-        Object hotNews = HookValues.readField(owner, "s");
-        if (hotNews instanceof View) {
-            ((View) hotNews).setVisibility(View.GONE);
-            LayoutParams lp = ((View) hotNews).getLayoutParams();
-            if (lp != null && lp.height > 0) {
-                lp.height = 0;
-                ((View) hotNews).setLayoutParams(lp);
-            }
-        }
-        Object actionIv = HookValues.readField(owner, "v");
-        if (actionIv instanceof View) {
-            ((View) actionIv).setVisibility(View.GONE);
-        }
-        Object binding = HookValues.readField(owner, "z");
-        if (binding != null) {
-            Object tabLayout = HookValues.readField(binding, "d", "searchHisSlidingTabLayout");
-            if (tabLayout instanceof View) {
-                View tabView = (View) tabLayout;
-                tabView.setVisibility(View.GONE);
-                if (tabView.getParent() instanceof View) {
-                    View parent = (View) tabView.getParent();
-                    parent.setVisibility(View.GONE);
-                    LayoutParams lp = parent.getLayoutParams();
-                    if (lp != null && lp.height > 0) {
-                        lp.height = 0;
-                        parent.setLayoutParams(lp);
-                    }
-                }
-            }
-            Object action = HookValues.readField(binding, "b", "ivAction");
-            if (action instanceof View) {
-                ((View) action).setVisibility(View.GONE);
-            }
-            Object vp = HookValues.readField(binding, "e", "searchHisVp");
-            if (vp instanceof View) {
-                View vpView = (View) vp;
-                vpView.setVisibility(View.GONE);
-                LayoutParams lp = vpView.getLayoutParams();
-                if (lp != null && lp.height > 0) {
-                    lp.height = 0;
-                    vpView.setLayoutParams(lp);
-                }
-            }
-        }
-    }
-
     /**
-     * The ROM can attach the hot-news header outside HotNewsViewForHome and
-     * re-create it after the tab click. Resource-specific class hooks then
-     * leave the header visible, so clean the complete decor tree for a short
-     * bounded window around a plain launch/search transition.
+     * The ROM can add the hot-news header outside HotNewsViewForHome and
+     * recreate it after a tab switch. Remove it from the actual parent tree
+     * during a short bounded startup pass as a fallback to addView blocking.
      */
     private static void scheduleHomeHotNewsCleanup(HookSession session, View root) {
         scheduleDynamicCleanup(session, root, CLEANUP_HOME);
@@ -3154,11 +3463,11 @@ public final class BrowserAdapter implements HostAdapter {
                         activeModes = DYNAMIC_CLEANUP_ROOTS.getOrDefault(root, 0);
                     }
                     if ((activeModes & CLEANUP_SEARCH) != 0) {
-                        cleanSearchViews(session, root);
+                        removeSearchFeatureViews(session, root);
                         collectHotNewsLabels(root, root);
                     }
                     if ((activeModes & CLEANUP_HOME) != 0) {
-                        hideHomeHotNews(session, root);
+                        removeHomeHotNews(session, root);
                     }
                 });
                 if (lastAttempt) {
@@ -3170,41 +3479,38 @@ public final class BrowserAdapter implements HostAdapter {
         }
     }
 
-    private static void hideHomeHotNews(HookSession session, View root) {
+    private static void removeHomeHotNews(HookSession session, View root) {
         if (root == null) {
             return;
         }
         HookValues.runOnMain(root, () -> {
+            removeConfiguredBrowserFeatureViews(session, root);
             collectHomeHotNews(root, root);
         });
     }
 
     private static void collectHomeHotNews(View view, View root) {
         String resourceName = HookValues.resourceEntryName(view);
-        if (HOME_HOT_NEWS_ID_SET.contains(resourceName)
-                && view.getVisibility() != View.GONE) {
-            view.setVisibility(View.GONE);
+        if (HOME_HOT_NEWS_ID_SET.contains(resourceName)) {
+            removeViewFromParent(view);
+            return;
         }
 
         if (view instanceof TextView) {
             CharSequence value = ((TextView) view).getText();
             String text = value == null ? "" : value.toString().trim();
             if (isSearchHotNewsLabel(text)) {
-                hideSearchHotNewsBlock(view);
+                removeSearchHotNewsBlock(view);
+                return;
             } else if (isSearchActiveLabel(text)) {
-                View container = view;
-                for (int level = 0; level < 3
-                        && container.getParent() instanceof View
-                        && container != root; level++) {
-                    container = (View) container.getParent();
-                }
-                makeEmptyPreserveHeight(container);
+                removeActiveBlock(view);
+                return;
             }
         }
 
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
                 collectHomeHotNews(group.getChildAt(i), root);
             }
         }
@@ -3215,22 +3521,16 @@ public final class BrowserAdapter implements HostAdapter {
             CharSequence value = ((TextView) view).getText();
             String text = value == null ? "" : value.toString().trim();
             if (isSearchHotNewsLabel(text)) {
-                hideSearchHotNewsBlock(view);
+                removeSearchHotNewsBlock(view);
+                return;
             } else if (isSearchActiveLabel(text)) {
-                View container = view;
-                for (int level = 0; level < 3
-                        && container.getParent() instanceof View
-                        && container != root; level++) {
-                    container = (View) container.getParent();
-                }
-                if (container.getVisibility() != View.GONE) {
-                    makeEmptyPreserveHeight(container);
-                }
+                removeActiveBlock(view);
+                return;
             }
         }
         if (view instanceof ViewGroup) {
             ViewGroup group = (ViewGroup) view;
-            for (int i = 0; i < group.getChildCount(); i++) {
+            for (int i = group.getChildCount() - 1; i >= 0; i--) {
                 collectHotNewsLabels(group.getChildAt(i), root);
             }
         }

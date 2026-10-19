@@ -1098,8 +1098,6 @@ object BrowserSettingsCompose {
         val isDark = remember(refreshRevision) { isDarkTheme(activity) }
         var showScreenRotationDialog by remember { mutableStateOf(false) }
         var showSearchEngineDialog by remember { mutableStateOf(false) }
-        var showHomepageSettingDialog by remember { mutableStateOf(false) }
-        var showMainModeDialog by remember { mutableStateOf(false) }
 
         remember(activity) {
             refreshNotifiers[activity] = {
@@ -1147,16 +1145,6 @@ object BrowserSettingsCompose {
                             idName = "search_engine",
                             title = "搜索引擎",
                             dynamicSummary = { act -> getCurrentSearchEngine(act).second }
-                        ),
-                        SettingRowItem.Navigation(
-                            idName = "homepage_setting",
-                            title = "主页设置",
-                            dynamicSummary = { act -> if (getHomepageMode(act) == 1) "中国移动" else "我的主页" }
-                        ),
-                        SettingRowItem.Navigation(
-                            idName = "main_setting",
-                            title = "主页版式",
-                            dynamicSummary = { act -> if (getMainMode(act) == 1) "简洁" else "默认" }
                         ),
                         SettingRowItem.Navigation(
                             idName = "screen_setting",
@@ -1333,27 +1321,6 @@ object BrowserSettingsCompose {
                 }
             )
         }
-        if (showHomepageSettingDialog) {
-            HomepageSettingDialog(
-                activity = activity,
-                isDark = isDark,
-                onDismiss = {
-                    showHomepageSettingDialog = false
-                    refreshRevision++
-                }
-            )
-        }
-        if (showMainModeDialog) {
-            MainModeDialog(
-                activity = activity,
-                isDark = isDark,
-                onDismiss = {
-                    showMainModeDialog = false
-                    refreshRevision++
-                }
-            )
-        }
-
         Scaffold(
             topBar = {
                 TopAppBar(
@@ -1428,8 +1395,6 @@ object BrowserSettingsCompose {
                                                 when (item.idName) {
                                                     "screen_setting" -> showScreenRotationDialog = true
                                                     "search_engine", "search_engine_choicer" -> showSearchEngineDialog = true
-                                                    "homepage_setting" -> showHomepageSettingDialog = true
-                                                    "main_setting" -> showMainModeDialog = true
                                                     else -> clickSetting(activity, item.idName)
                                                 }
                                             }
@@ -1535,8 +1500,6 @@ object BrowserSettingsCompose {
         val isDark = remember(refreshRevision) { isDarkTheme(activity) }
         var showScreenRotationDialog by remember { mutableStateOf(false) }
         var showSearchEngineDialog by remember { mutableStateOf(false) }
-        var showHomepageSettingDialog by remember { mutableStateOf(false) }
-        var showMainModeDialog by remember { mutableStateOf(false) }
 
         remember(activity) {
             refreshNotifiers[activity] = {
@@ -1565,27 +1528,6 @@ object BrowserSettingsCompose {
                 }
             )
         }
-        if (showHomepageSettingDialog) {
-            HomepageSettingDialog(
-                activity = activity,
-                isDark = isDark,
-                onDismiss = {
-                    showHomepageSettingDialog = false
-                    refreshRevision++
-                }
-            )
-        }
-        if (showMainModeDialog) {
-            MainModeDialog(
-                activity = activity,
-                isDark = isDark,
-                onDismiss = {
-                    showMainModeDialog = false
-                    refreshRevision++
-                }
-            )
-        }
-
         val title = remember(activity) {
             extractTitle(activity, origMain)
         }
@@ -1649,9 +1591,7 @@ object BrowserSettingsCompose {
                                 isDark = isDark,
                                 revision = refreshRevision,
                                 onOpenSearchEngineDialog = { showSearchEngineDialog = true },
-                                onOpenScreenRotationDialog = { showScreenRotationDialog = true },
-                                onOpenHomepageSettingDialog = { showHomepageSettingDialog = true },
-                                onOpenMainModeDialog = { showMainModeDialog = true }
+                                onOpenScreenRotationDialog = { showScreenRotationDialog = true }
                             )
                         }
                     }
@@ -1968,12 +1908,18 @@ object BrowserSettingsCompose {
         isDark: Boolean,
         revision: Int,
         onOpenSearchEngineDialog: () -> Unit,
-        onOpenScreenRotationDialog: () -> Unit,
-        onOpenHomepageSettingDialog: () -> Unit,
-        onOpenMainModeDialog: () -> Unit
+        onOpenScreenRotationDialog: () -> Unit
     ) {
         val sections = remember(origMain, revision) {
-            inspectViewTree(origMain)
+            inspectViewTree(origMain).mapNotNull { section ->
+                val rows = section.rows.filterNot { row ->
+                    val entryName = getResourceEntryName(row.originalView)
+                    entryName == "homepage_setting" || entryName == "main_setting" ||
+                        entryName == "infoflow_setting" || row.title == "主页设置" ||
+                        row.title == "主页版式" || row.title == "主页资讯"
+                }
+                section.copy(rows = rows).takeIf { rows.isNotEmpty() }
+            }
         }
 
         if (sections.isEmpty()) {
@@ -2032,12 +1978,6 @@ object BrowserSettingsCompose {
                                     else -> "跟随系统"
                                 }
                             }
-                            entryName == "homepage_setting" || (row.title == "主页设置" && entryName != "main_setting") -> {
-                                if (getHomepageMode(activity) == 1) "中国移动" else "我的主页"
-                            }
-                            entryName == "main_setting" || row.title.contains("主页版式") -> {
-                                if (getMainMode(activity) == 1) "简洁" else "默认"
-                            }
                             else -> row.summary
                         }
                         SettingsNavigationRow(
@@ -2051,12 +1991,6 @@ object BrowserSettingsCompose {
                                     }
                                     entryName == "screen_setting" || row.title.contains("屏幕旋转") -> {
                                         onOpenScreenRotationDialog()
-                                    }
-                                    entryName == "homepage_setting" || (row.title == "主页设置" && entryName != "main_setting") -> {
-                                        onOpenHomepageSettingDialog()
-                                    }
-                                    entryName == "main_setting" || row.title.contains("主页版式") -> {
-                                        onOpenMainModeDialog()
                                     }
                                     else -> {
                                         if (activity is View.OnClickListener) {
@@ -2100,10 +2034,20 @@ object BrowserSettingsCompose {
             if (resName == "title_bar" || resName == "status_bar" || resName.startsWith("separator")) {
                 return
             }
+            if (resName == "homepage_setting" || resName == "main_setting" ||
+                resName == "infoflow_setting"
+            ) {
+                return
+            }
 
             // Check if this view itself is a setting row
             val parsedRow = parseSettingRow(view)
             if (parsedRow != null) {
+                if (parsedRow.title == "主页设置" || parsedRow.title == "主页版式" ||
+                    parsedRow.title == "主页资讯"
+                ) {
+                    return
+                }
                 currentRows.add(parsedRow)
                 return
             }
@@ -2787,10 +2731,6 @@ object BrowserSettingsCompose {
             if (resId != 0) {
                 activity.findViewById<TextView>(resId)?.text = option.name
             }
-            val mainCurId = activity.resources.getIdentifier("main_setting_current", "id", activity.packageName)
-            if (mainCurId != 0) {
-                activity.findViewById<TextView>(mainCurId)?.text = option.name
-            }
         } catch (ignored: Throwable) {}
 
         refreshNotifiers[activity]?.invoke()
@@ -2845,305 +2785,6 @@ object BrowserSettingsCompose {
                         ) {
                             Text(
                                 text = option.name,
-                                fontSize = 16.sp,
-                                fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
-                                color = if (isSelected) accentColor else (if (isDark) TextPrimaryDark else TextPrimaryLight),
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            // Radio indicator
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Canvas(modifier = Modifier.size(20.dp)) {
-                                    if (isSelected) {
-                                        drawCircle(
-                                            color = accentColor,
-                                            radius = size.minDimension / 2f
-                                        )
-                                        drawCircle(
-                                            color = Color.White,
-                                            radius = size.minDimension * 0.22f
-                                        )
-                                    } else {
-                                        drawCircle(
-                                            color = if (isDark) Color(0xFF545458) else Color(0xFFC7C7CC),
-                                            radius = size.minDimension / 2f,
-                                            style = Stroke(width = 1.8.dp.toPx())
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = onDismiss) {
-                            Text(
-                                text = "取消",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = accentColor
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // --- Homepage Settings & Dialog ---
-
-    fun getHomepageMode(context: Context): Int {
-        return try {
-            val hcClz = context.classLoader.loadClass("com.android.browser.HomeConfigManager")
-            val bMethod = hcClz.getMethod("b")
-            bMethod.invoke(null) as? Int ?: 0
-        } catch (ignored: Throwable) {
-            0
-        }
-    }
-
-    fun setHomepageMode(activity: Activity, mode: Int) {
-        try {
-            val hcClz = activity.classLoader.loadClass("com.android.browser.HomeConfigManager")
-            val gMethod = hcClz.getMethod("g", Int::class.javaPrimitiveType)
-            gMethod.invoke(null, mode)
-        } catch (ignored: Throwable) {}
-
-        try {
-            val resId = activity.resources.getIdentifier("homepage_setting_description", "id", activity.packageName)
-            if (resId != 0) {
-                val desc = if (mode == 1) "中国移动" else "我的主页"
-                activity.findViewById<TextView>(resId)?.text = desc
-            }
-        } catch (ignored: Throwable) {}
-
-        refreshNotifiers[activity]?.invoke()
-    }
-
-    @Composable
-    fun HomepageSettingDialog(
-        activity: Activity,
-        isDark: Boolean,
-        onDismiss: () -> Unit
-    ) {
-        val currentMode = remember { getHomepageMode(activity) }
-        var selectedMode by remember { mutableIntStateOf(currentMode) }
-
-        val options = listOf(
-            0 to "我的主页",
-            1 to "中国移动"
-        )
-
-        Dialog(onDismissRequest = onDismiss) {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = if (isDark) CardBgDark else CardBgLight,
-                tonalElevation = 6.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp)
-                ) {
-                    Text(
-                        text = "主页设置",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) TextPrimaryDark else TextPrimaryLight,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-
-                    val accentColor = MaterialTheme.colorScheme.primary
-                    options.forEach { (mode, label) ->
-                        val isSelected = selectedMode == mode
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    selectedMode = mode
-                                    setHomepageMode(activity, mode)
-                                    onDismiss()
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = label,
-                                fontSize = 16.sp,
-                                fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
-                                color = if (isSelected) accentColor else (if (isDark) TextPrimaryDark else TextPrimaryLight),
-                                modifier = Modifier.weight(1f)
-                            )
-
-                            // Radio indicator
-                            Box(
-                                modifier = Modifier
-                                    .size(20.dp)
-                                    .clip(CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Canvas(modifier = Modifier.size(20.dp)) {
-                                    if (isSelected) {
-                                        drawCircle(
-                                            color = accentColor,
-                                            radius = size.minDimension / 2f
-                                        )
-                                        drawCircle(
-                                            color = Color.White,
-                                            radius = size.minDimension * 0.22f
-                                        )
-                                    } else {
-                                        drawCircle(
-                                            color = if (isDark) Color(0xFF545458) else Color(0xFFC7C7CC),
-                                            radius = size.minDimension / 2f,
-                                            style = Stroke(width = 1.8.dp.toPx())
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = onDismiss) {
-                            Text(
-                                text = "取消",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = accentColor
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // --- Main Mode (主页版式) Settings & Dialog ---
-
-    fun getMainMode(context: Context): Int {
-        return try {
-            val dcClz = context.classLoader.loadClass("com.android.browser.datacenter.DataCenter")
-            val getInst = dcClz.getMethod("getInstance")
-            val dc = getInst.invoke(null)
-            if (dc != null) {
-                val dkMethod = dcClz.getMethod("getDataKeeper")
-                val dk = dkMethod.invoke(dc)
-                if (dk != null) {
-                    val hMethod = dk.javaClass.getMethod("h", String::class.java, Int::class.javaPrimitiveType)
-                    return hMethod.invoke(dk, "main_mode", 0) as? Int ?: 0
-                }
-            }
-            0
-        } catch (ignored: Throwable) {
-            0
-        }
-    }
-
-    fun setMainMode(activity: Activity, mode: Int) {
-        try {
-            val dcClz = activity.classLoader.loadClass("com.android.browser.datacenter.DataCenter")
-            val getInst = dcClz.getMethod("getInstance")
-            val dc = getInst.invoke(null)
-            if (dc != null) {
-                val dkMethod = dcClz.getMethod("getDataKeeper")
-                val dk = dkMethod.invoke(dc)
-                if (dk != null) {
-                    val oMethod = dk.javaClass.getMethod("o", String::class.java, Int::class.javaPrimitiveType)
-                    oMethod.invoke(dk, "main_mode", mode)
-                }
-            }
-        } catch (ignored: Throwable) {}
-
-        try {
-            val xMethod = activity.javaClass.getMethod("x")
-            xMethod.isAccessible = true
-            xMethod.invoke(activity)
-        } catch (ignored: Throwable) {}
-
-        try {
-            val resId = activity.resources.getIdentifier("main_setting_current", "id", activity.packageName)
-            if (resId != 0) {
-                val desc = if (mode == 1) "简洁" else "默认"
-                activity.findViewById<TextView>(resId)?.text = desc
-            }
-        } catch (ignored: Throwable) {}
-
-        refreshNotifiers[activity]?.invoke()
-    }
-
-    @Composable
-    fun MainModeDialog(
-        activity: Activity,
-        isDark: Boolean,
-        onDismiss: () -> Unit
-    ) {
-        val currentMode = remember { getMainMode(activity) }
-        var selectedMode by remember { mutableIntStateOf(currentMode) }
-
-        val options = listOf(
-            0 to "默认",
-            1 to "简洁"
-        )
-
-        Dialog(onDismissRequest = onDismiss) {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = if (isDark) CardBgDark else CardBgLight,
-                tonalElevation = 6.dp,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp)
-                ) {
-                    Text(
-                        text = "主页版式",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDark) TextPrimaryDark else TextPrimaryLight,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-
-                    val accentColor = MaterialTheme.colorScheme.primary
-                    options.forEach { (mode, label) ->
-                        val isSelected = selectedMode == mode
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    selectedMode = mode
-                                    setMainMode(activity, mode)
-                                    onDismiss()
-                                }
-                                .padding(vertical = 12.dp, horizontal = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = label,
                                 fontSize = 16.sp,
                                 fontWeight = if (isSelected) FontWeight.Medium else FontWeight.Normal,
                                 color = if (isSelected) accentColor else (if (isDark) TextPrimaryDark else TextPrimaryLight),

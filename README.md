@@ -41,13 +41,6 @@ gh auth login
 
 ## GitHub Release
 
-正常发布不依赖 GitHub Actions；本地 `./scripts/build-release.sh --publish` 会直接调用 GitHub CLI 创建 Release。`.github/workflows/release.yml` 仅保留为手动触发的备用流程，不会因推送 `main` 消耗 Actions 额度。
-
-未配置签名 Secrets 时，Release 使用 GitHub runner 的临时 debug keystore，APK 可以安装，但不同 runner 的签名不保证相同，后续版本可能无法覆盖升级。要保持签名一致，请配置以下仓库 Secrets：
-
-- `ANDROID_KEYSTORE_BASE64`：Release keystore 的 Base64 内容，例如用 `base64 -w0 redmagic-release.jks` 生成。
-- `ANDROID_KEYSTORE_PASSWORD`
-- `ANDROID_KEY_ALIAS`
-- `ANDROID_KEY_PASSWORD`
+Release 仅通过本地 `./scripts/build-release.sh --publish` 调用 GitHub CLI 发布，不配置 GitHub Actions 工作流。未设置 `RELEASE_STORE_FILE`、`RELEASE_STORE_PASSWORD`、`RELEASE_KEY_ALIAS` 和 `RELEASE_KEY_PASSWORD` 时，APK 使用本机 debug 签名；要保持后续版本可覆盖安装，请在本机配置固定的 Release keystore。
 
 本模块使用自己的签名，不能直接覆盖由原作者签名的旧版模块。升级前需在 LSPosed/管理器备份设置和作用域，并确认接受签名不同带来的重装要求。

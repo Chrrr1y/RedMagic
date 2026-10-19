@@ -26,4 +26,4 @@
 
 - Before publishing locally, authenticate once with `gh auth login`.
 - The publishing command requires repository contents write permission.
-- GitHub Actions is a manual fallback only and must not be required for normal releases.
+- Releases are published locally through the authenticated `gh` CLI. Do not add GitHub Actions workflows for builds or releases.
