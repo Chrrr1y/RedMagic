@@ -1,7 +1,10 @@
 package dev.lackluster.redmagichelper.util
 
 import android.content.Context
+import android.net.Uri
+import android.util.Xml
 import org.json.JSONObject
+import org.xmlpull.v1.XmlPullParser
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -30,6 +33,12 @@ internal sealed interface GitHubUpdateResult {
 internal object GitHubReleaseChecker {
     private const val API_URL =
         "https://api.github.com/repos/Chrrr1y/RedMagic/releases/latest"
+    private const val RELEASES_FEED_URL =
+        "https://github.com/Chrrr1y/RedMagic/releases.atom"
+    private const val RELEASE_DOWNLOAD_BASE =
+        "https://github.com/Chrrr1y/RedMagic/releases/download"
+    private const val RELEASE_PAGE_PREFIX =
+        "https://github.com/Chrrr1y/RedMagic/releases/tag/"
     private const val PREFERENCES = "github_release_check"
     private const val CACHE_DURATION_MS = 6 * 60 * 60 * 1000L
 
@@ -71,6 +80,22 @@ internal object GitHubReleaseChecker {
     }
 
     private fun fetchLatestRelease(): GitHubRelease {
+        val feedError = try {
+            return fetchLatestReleaseFromFeed()
+        } catch (error: Exception) {
+            error
+        }
+
+        return try {
+            fetchLatestReleaseFromApi()
+        } catch (apiError: Exception) {
+            throw IOException("Unable to fetch the latest GitHub release", apiError).apply {
+                addSuppressed(feedError)
+            }
+        }
+    }
+
+    private fun fetchLatestReleaseFromApi(): GitHubRelease {
         val connection = URL(API_URL).openConnection() as HttpURLConnection
         try {
             connection.requestMethod = "GET"
@@ -111,6 +136,76 @@ internal object GitHubReleaseChecker {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun fetchLatestReleaseFromFeed(): GitHubRelease {
+        val connection = URL(RELEASES_FEED_URL).openConnection() as HttpURLConnection
+        try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 8_000
+            connection.readTimeout = 8_000
+            connection.setRequestProperty("Accept", "application/atom+xml, application/xml")
+            connection.setRequestProperty("User-Agent", "RedMagic-Helper-Android")
+
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                throw IOException("GitHub releases feed returned HTTP $responseCode")
+            }
+
+            var title: String? = null
+            var releaseUrl: String? = null
+            val parser = Xml.newPullParser().apply {
+                setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+            }
+            connection.inputStream.use { input ->
+                parser.setInput(input, Charsets.UTF_8.name())
+                while (parser.eventType != XmlPullParser.END_DOCUMENT) {
+                    if (parser.eventType == XmlPullParser.START_TAG && parser.name == "entry") {
+                        while (parser.next() != XmlPullParser.END_DOCUMENT) {
+                            when (parser.eventType) {
+                                XmlPullParser.START_TAG -> when (parser.name) {
+                                    "title" -> if (title == null) title = parser.nextText()
+                                    "link" -> {
+                                        val relation = parser.getAttributeValue(null, "rel")
+                                        if (relation == "alternate") {
+                                            releaseUrl = parser.getAttributeValue(null, "href")
+                                        }
+                                    }
+                                }
+                                XmlPullParser.END_TAG -> if (parser.name == "entry") break
+                            }
+                        }
+                        break
+                    }
+                    parser.next()
+                }
+            }
+
+            val pageUrl = releaseUrl?.takeIf { it.startsWith(RELEASE_PAGE_PREFIX) }
+                ?: throw IOException("GitHub releases feed has no latest release link")
+            val tagName = pageUrl.substringAfterLast('/').takeIf(String::isNotBlank)
+                ?: throw IOException("GitHub release link has no tag")
+            val version = parseTag(tagName)
+            val apkUrl = buildExpectedApkUrl(tagName, version)
+
+            return GitHubRelease(
+                tagName = tagName,
+                title = title?.takeIf(String::isNotBlank) ?: tagName,
+                releaseUrl = pageUrl,
+                apkUrl = apkUrl,
+                versionName = version.first,
+                versionCode = version.second
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun buildExpectedApkUrl(tagName: String, version: Pair<String?, Long?>): String? {
+        val versionName = version.first?.takeIf { it.matches(Regex("[A-Za-z0-9._-]+")) }
+            ?: return null
+        val versionCode = version.second ?: return null
+        return "$RELEASE_DOWNLOAD_BASE/${Uri.encode(tagName)}/redmagic-helper-$versionName-$versionCode.apk"
     }
 
     private fun parseTag(tagName: String): Pair<String?, Long?> {
