@@ -3125,7 +3125,8 @@ private fun getPackagesForCategory(category: SettingCategory): List<String> = wh
         "cn.nubia.gamehelpmodule",
         "cn.nubia.gamehelperline",
         "cn.zte.gamefloat",
-        "com.zte.game.plugintrigger"
+        "com.zte.game.plugintrigger",
+        "cn.nubia.gamelab"
     )
     SettingCategory.STORE -> listOf("cn.nubia.neostore", "cn.nubia.neogamecenter")
     SettingCategory.DESKTOP -> listOf(
@@ -3238,12 +3239,14 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
         "cn.nubia.gameassist"
     )
     "ai_trigger_switch",
-    "ai_trigger_template_scan_ms",
+    "ai_trigger_template_scan_ms" -> listOf(
+        "com.zte.game.plugintrigger",
+        "cn.nubia.gamelab"
+    )
     "ai_trigger_click_ms",
     "ai_trigger_cooldown_ms",
     "ai_trigger_yolo_scan_ms" -> listOf(
-        "com.zte.game.plugintrigger",
-        "cn.nubia.gamelauncher"
+        "com.zte.game.plugintrigger"
     )
     "double_any_app",
     "rm_low_memory_limit" -> listOf(

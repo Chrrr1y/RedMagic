@@ -167,7 +167,7 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
         SettingItem.Toggle("游戏连招加速", "game_space_combo_speed_enabled", "按设定倍率缩短一键连招的触摸间隔，加速播放执行。"),
         SettingItem.Number("游戏连招播放倍率（1-10）", "game_space_combo_speed_rate", 1, "连招播放速度倍率（范围 1 到 10）。", "game_space_combo_speed_enabled"),
         SettingItem.Toggle("隐藏破坏神模式退出提示", "game_space_devil_mode_hide_prompt", "退出破坏神模式时不再弹出确认对话框。"),
-        SettingItem.Toggle("AI 触发器总开关", "ai_trigger_switch", "开启基于视觉模型的红魔 AI 游戏辅助触发器。"),
+        SettingItem.Toggle("AI 触发器总开关", "ai_trigger_switch", "控制 PluginTrigger 和游戏实验室的 AI 扫描 Hook；修改后点击底部“重启”生效。"),
         SettingItem.Number("AI 模板扫描间隔（毫秒）", "ai_trigger_template_scan_ms", 180, "AI 模板扫描执行周期。", "ai_trigger_switch"),
         SettingItem.Number("AI 点击延迟（毫秒）", "ai_trigger_click_ms", 25, "触发点击操作的延迟时长。", "ai_trigger_switch"),
         SettingItem.Number("AI 触发冷却（毫秒）", "ai_trigger_cooldown_ms", 180, "两次触发动作之间的冷却间隔。", "ai_trigger_switch"),
