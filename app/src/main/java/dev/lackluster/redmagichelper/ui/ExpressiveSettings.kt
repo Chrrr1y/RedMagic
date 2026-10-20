@@ -3269,7 +3269,6 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
 
     "allow_thirdparty_launcher",
     "system_desktop_recent_task_display_memory",
-    "system_time_component_desktop_switch",
     "system_time_component_desktop_show_seconds",
     "system_time_component_desktop_show_period",
     "desktop_app_icon_customize_switch" -> listOf("com.zte.mifavor.launcher")

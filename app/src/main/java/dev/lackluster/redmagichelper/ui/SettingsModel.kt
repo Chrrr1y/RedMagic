@@ -191,7 +191,6 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
         SettingItem.Toggle("主题启动页跳过广告", "beautify_skip_splash_ads", "打开主题时直接进入主题首页，不显示启动广告页。"),
         SettingItem.Toggle("允许第三方桌面", "allow_thirdparty_launcher", "解除系统限制，支持将第三方 Launcher 设置为默认桌面。"),
         SettingItem.Toggle("最近任务显示内存信息", "system_desktop_recent_task_display_memory", "在多任务最近任务界面清除全部按钮旁显示系统剩余与总内存信息。"),
-        SettingItem.Toggle("桌面时钟适配", "system_time_component_desktop_switch", "适配红魔官方桌面时钟小组件显示样式。"),
         SettingItem.Toggle("桌面时钟显示秒数", "system_time_component_desktop_show_seconds", "桌面时钟小组件实时刷新并显示秒数。"),
         SettingItem.Toggle("桌面时钟显示中文时段", "system_time_component_desktop_show_period", "桌面时钟小组件显示上午/下午/晚上等时段信息。"),
         SettingItem.Toggle("自定义桌面应用图标与名称", "desktop_app_icon_customize_switch", "开启后支持替换桌面应用图标与名称，需重启桌面生效。")

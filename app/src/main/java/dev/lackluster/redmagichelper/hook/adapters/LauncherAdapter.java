@@ -84,11 +84,7 @@ public final class LauncherAdapter implements HostAdapter {
     @Override
     public void install(HookSession session) {
         sSession = session;
-        boolean clockEnabled = session.config().getBoolean(
-                "system_time_component_desktop_switch", false);
-        if (clockEnabled) {
-            installClock(session);
-        }
+        installClock(session);
         if (session.config().getBoolean("desktop_app_icon_customize_switch", false)) {
             installIconCustomization(session);
         }
