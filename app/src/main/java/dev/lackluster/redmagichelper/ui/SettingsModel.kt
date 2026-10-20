@@ -10,7 +10,7 @@ enum class SettingCategory(
     BROWSER(
         "浏览器适配",
         "去除启动广告、默认搜索页与界面精简",
-        R.drawable.ic_header_browser
+        R.drawable.ic_launcher_nubrowser
     ),
     SYSTEM_UI(
         "系统界面",

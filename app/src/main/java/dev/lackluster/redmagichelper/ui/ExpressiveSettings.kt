@@ -12,6 +12,8 @@ import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -47,6 +49,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -132,7 +135,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -434,11 +440,11 @@ private fun DynamicScheme.toMaterialColorScheme(): ColorScheme {
 }
 
 /**
- * Navigation tabs specification: "首页"(home), "关于"(about).
+ * Navigation tabs specification: "首页"(home), "设置"(settings).
  */
 enum class MainNavTab(val title: String, val iconRes: Int) {
     HOME("首页", R.drawable.ic_home),
-    SETTINGS("设置", R.drawable.ic_about)
+    SETTINGS("设置", R.drawable.ic_settings)
 }
 
 @Serializable
@@ -1279,12 +1285,7 @@ private fun ExpressiveCategoryItem(
                     .background(colors.primaryContainer, CircleShape),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    painter = painterResource(category.iconRes),
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = Color.Unspecified
-                )
+                SettingCategoryIcon(category, Modifier.size(24.dp))
             }
 
             Spacer(Modifier.width(14.dp))
@@ -1333,6 +1334,52 @@ private fun ExpressiveCategoryItem(
     }
 }
 
+@Composable
+private fun SettingCategoryIcon(category: SettingCategory, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var browserIcon by remember(context, category) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(context, category) {
+        if (category == SettingCategory.BROWSER) {
+            browserIcon = withContext(Dispatchers.IO) { loadBrowserApplicationIcon(context) }
+        }
+    }
+
+    val loadedBrowserIcon = browserIcon
+    if (category == SettingCategory.BROWSER && loadedBrowserIcon != null) {
+        Image(
+            bitmap = loadedBrowserIcon,
+            contentDescription = null,
+            modifier = modifier,
+            contentScale = ContentScale.Fit
+        )
+    } else {
+        Icon(
+            painter = painterResource(category.iconRes),
+            contentDescription = null,
+            modifier = modifier,
+            tint = Color.Unspecified
+        )
+    }
+}
+
+private fun loadBrowserApplicationIcon(context: Context): ImageBitmap? = runCatching {
+    val packageManager = context.applicationContext.packageManager
+    val icon = sequenceOf("cn.nubia.browser", "com.nubia.browser", "com.nubia.brwoser")
+        .mapNotNull { packageName -> runCatching { packageManager.getApplicationIcon(packageName) }.getOrNull() }
+        .firstOrNull()
+        ?: return@runCatching null
+
+    val bitmapSize = 144
+    Bitmap.createBitmap(bitmapSize, bitmapSize, Bitmap.Config.ARGB_8888).also { bitmap ->
+        val canvas = Canvas(bitmap)
+        icon.mutate().apply {
+            setBounds(0, 0, bitmapSize, bitmapSize)
+            draw(canvas)
+        }
+    }
+        .asImageBitmap()
+}.getOrNull()
+
 /**
  * Category Detail View showing all settings with M3 Expressive card grouping.
  */
@@ -1375,12 +1422,7 @@ private fun CategoryDetailView(
                     color = colors.primaryContainer
                 ) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Icon(
-                            painter = painterResource(category.iconRes),
-                            contentDescription = null,
-                            modifier = Modifier.size(24.dp),
-                            tint = Color.Unspecified
-                        )
+                        SettingCategoryIcon(category, Modifier.size(24.dp))
                     }
                 }
                 Spacer(Modifier.width(14.dp))
@@ -2619,7 +2661,7 @@ private fun SettingsScreen(
                     HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp))
                     SettingsActionRow(
                         title = "关于设备",
-                        iconRes = R.drawable.ic_about,
+                        iconRes = R.drawable.fullscreen_portrait_24,
                         summary = "查看 SELinux 状态、设备型号和系统指纹",
                         onClick = onOpenAboutDevice
                     )

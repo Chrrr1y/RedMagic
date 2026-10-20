@@ -8,6 +8,10 @@ captures/
 .cxx/
 *.aab
 *.apk
+*.class
+*.dex
+*.odex
+*.vdex
 output-metadata.json
 
 # IDE and OS files
@@ -19,6 +23,13 @@ render.experimental.xml
 .DS_Store
 *.log
 *.hprof
+
+# Perfetto captures and generated profiling reports
+*.pftrace
+*.perfetto-trace
+*.trace
+*.trace.gz
+perfetto_analysis_report.md
 
 # Device extraction and reverse-engineering workspace
 /offline/
