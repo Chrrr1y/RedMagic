@@ -6,6 +6,7 @@ package dev.lackluster.redmagichelper.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.ApplicationInfo
 import android.os.Build
@@ -158,6 +159,9 @@ import com.materialkolor.scheme.SchemeTonalSpot
 import com.materialkolor.scheme.SchemeVibrant
 import dev.lackluster.redmagichelper.HelperApplication
 import dev.lackluster.redmagichelper.R
+import dev.lackluster.redmagichelper.util.GitHubRelease
+import dev.lackluster.redmagichelper.util.GitHubReleaseChecker
+import dev.lackluster.redmagichelper.util.GitHubUpdateResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -2518,7 +2522,34 @@ private fun SettingsScreen(
     onAppearanceChanged: (AppearanceSettings) -> Unit,
     onOpenAboutDevice: () -> Unit
 ) {
+    val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
+    val packageInfo = remember(context) {
+        runCatching { context.packageManager.getPackageInfo(context.packageName, 0) }
+            .getOrNull()
+    }
+    val installedVersionName = packageInfo?.versionName ?: "未知"
+    val installedVersionCode = packageInfo?.longVersionCode ?: 0L
+    val updateScope = rememberCoroutineScope()
+    var isCheckingUpdate by remember { mutableStateOf(true) }
+    var updateResult by remember { mutableStateOf<GitHubUpdateResult?>(null) }
+
+    val checkForUpdates: (Boolean) -> Unit = { forceRefresh ->
+        updateScope.launch {
+            isCheckingUpdate = true
+            updateResult = GitHubReleaseChecker.check(
+                context = context,
+                installedVersionName = installedVersionName,
+                installedVersionCode = installedVersionCode,
+                forceRefresh = forceRefresh
+            )
+            isCheckingUpdate = false
+        }
+    }
+    LaunchedEffect(installedVersionName, installedVersionCode) {
+        checkForUpdates(false)
+    }
+
     LazyColumn(
         state = listState,
         modifier = Modifier
@@ -2589,10 +2620,80 @@ private fun SettingsScreen(
                     SettingsActionRow(
                         title = "关于设备",
                         iconRes = R.drawable.ic_about,
-                        summary = "查看 SELinux 状态、设备型号、系统指纹和版本",
+                        summary = "查看 SELinux 状态、设备型号和系统指纹",
                         onClick = onOpenAboutDevice
                     )
+                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp))
+                    SoftwareVersionRow(
+                        versionName = installedVersionName,
+                        isChecking = isCheckingUpdate,
+                        result = updateResult,
+                        onCheck = { checkForUpdates(true) },
+                        onDownload = { release ->
+                            runCatching {
+                                context.startActivity(
+                                    Intent(Intent.ACTION_VIEW, Uri.parse(release.downloadUrl))
+                                )
+                            }
+                        }
+                    )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SoftwareVersionRow(
+    versionName: String,
+    isChecking: Boolean,
+    result: GitHubUpdateResult?,
+    onCheck: () -> Unit,
+    onDownload: (GitHubRelease) -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    val available = (result as? GitHubUpdateResult.Available)?.release
+    val summary = when {
+        isChecking -> "当前版本 v$versionName · 正在检查 GitHub 更新"
+        available != null -> "当前版本 v$versionName · 发现新版本 ${available.tagName}"
+        result is GitHubUpdateResult.UpToDate -> "当前版本 v$versionName · 已是最新版本"
+        else -> "当前版本 v$versionName · 检查失败，点击重试"
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(enabled = !isChecking, onClick = onCheck),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            SettingsLeadingIcon(R.drawable.ic_info)
+            Spacer(Modifier.width(16.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Text("软件版本", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
+                Text(
+                    summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        when {
+            isChecking -> LoadingIndicator(modifier = Modifier.size(28.dp))
+            available != null -> TextButton(onClick = { onDownload(available) }) {
+                Text("下载")
+            }
+            else -> TextButton(onClick = onCheck) {
+                Text(if (result is GitHubUpdateResult.UpToDate) "检查" else "重试")
             }
         }
     }
@@ -2807,16 +2908,8 @@ private fun SettingsLeadingIcon(iconRes: Int) {
 
 @Composable
 private fun AboutDeviceScreen() {
-    val context = LocalContext.current
     val colors = MaterialTheme.colorScheme
     var selinuxStatus by remember { mutableStateOf<String?>(null) }
-    val versionName = remember(context) {
-        try {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "未知"
-        } catch (_: Throwable) {
-            "未知"
-        }
-    }
     LaunchedEffect(Unit) {
         selinuxStatus = withContext(Dispatchers.IO) { readSelinuxStatus() }
     }
@@ -2845,8 +2938,6 @@ private fun AboutDeviceScreen() {
                     DeviceInfoRow(R.drawable.ic_device, "设备型号", "${Build.MANUFACTURER} ${Build.MODEL}")
                     HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp, end = 18.dp))
                     DeviceInfoRow(R.drawable.ic_fingerprint, "系统指纹", Build.FINGERPRINT)
-                    HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp, end = 18.dp))
-                    DeviceInfoRow(R.drawable.ic_info, "软件版本", "v$versionName")
                 }
             }
         }
