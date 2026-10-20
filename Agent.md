@@ -10,6 +10,17 @@
 - CI or release scripts may provide `VERSION_CODE`, `VERSION_NAME`, and `RELEASE_TAG` through the environment.
 - Release tags use `v<versionName>-build-<versionCode>`.
 
+## Git Commit Convention
+
+- Use Conventional Commits: `<type>(<scope>): <imperative summary>`. Omit the scope when it does not add useful context.
+- Keep commit subjects in English to match the existing history, under 72 characters, and without a trailing period.
+- Examples: `fix(update): fall back to the GitHub releases feed` and `docs(agent): define commit conventions`.
+- Use `feat` for user-facing features, `fix` for bug fixes, `perf` for performance work, `refactor` for behavior-preserving code changes, `ui` for visual changes, `build` for build tooling, `docs` for documentation, and `chore` for maintenance.
+- Keep each commit focused on one logical change. Explain non-obvious decisions in the commit body; mark incompatible changes with `!` and document them under `BREAKING CHANGE:`.
+- Before committing, review `git status --short`, `git diff --check`, and the staged diff. Stage explicit paths instead of using `git add .`.
+- Commit source, documentation, and required project configuration only. Never commit APKs, build outputs, release bundles, Perfetto traces, signing keys, credentials, or machine-local configuration.
+- Do not rewrite published commit history unless the task explicitly requires it.
+
 ## Build And Release
 
 - Use `./scripts/build-release.sh` for a local Release build.
