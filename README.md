@@ -61,7 +61,7 @@
 ./scripts/build-release.sh
 ```
 
-产物写入 `dist/release/`，构建元数据写入 `app/build/generated/version/`。Release 标签格式为 `v<versionName>-build-<versionCode>`；版本号默认来自 `app/build.gradle`，也可通过 `VERSION_NAME`、`VERSION_CODE` 环境变量覆盖。
+产物写入 `dist/release/`，构建元数据写入 `app/build/generated/version/`。`version.txt` 保存最近一次成功构建的版本号；未设置 `VERSION_NAME` 时，每次成功的 Release 构建都会递增补丁号并写回该文件。`versionCode` 默认使用当前 Unix 时间戳。Release 标签格式为 `v<versionName>-build-<versionCode>`。需要指定版本时可设置 `VERSION_NAME`，也可通过 `VERSION_CODE` 覆盖构建号；显式指定 `VERSION_NAME` 时不会自动递增或改写 `version.txt`。
 
 此流程只编译 Release。需要 Debug APK 时再单独执行：
 

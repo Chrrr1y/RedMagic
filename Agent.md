@@ -2,7 +2,9 @@
 
 ## Versioning
 
-- The base application version is `4.0.4`.
+- `version.txt` stores the version name from the latest successful default Release build.
+- `./scripts/build-release.sh` increments the patch component before compiling and records the new version only after the build artifacts are generated.
+- An explicit `VERSION_NAME` overrides automatic version incrementing and does not update `version.txt`.
 - Never append `-rewrite` to `versionName`.
 - Every local build gets an automatic numeric `versionCode` from the current Unix timestamp unless `VERSION_CODE` is explicitly provided.
 - CI or release scripts may provide `VERSION_CODE`, `VERSION_NAME`, and `RELEASE_TAG` through the environment.

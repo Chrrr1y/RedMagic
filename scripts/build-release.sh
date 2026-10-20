@@ -5,6 +5,10 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 publish=false
+version_name_override=false
+if [[ -n "${VERSION_NAME:-}" ]]; then
+    version_name_override=true
+fi
 if [[ "${1:-}" == "--publish" ]]; then
     publish=true
 elif [[ $# -gt 0 ]]; then
@@ -27,6 +31,10 @@ scripts/release-notes.sh "$VERSION_NAME" "$VERSION_CODE" "$RELEASE_TAG" > "$note
 cp app/build/outputs/apk/release/app-release.apk "$apk_file"
 sha256sum "$apk_file" > "$sha_file"
 cp "$notes_file" "$release_dir/BUILD_NOTES.md"
+
+if [[ "$version_name_override" != true ]]; then
+    scripts/version.sh --record "$VERSION_NAME"
+fi
 
 printf 'Release APK: %s\n' "$apk_file"
 printf 'Checksum: %s\n' "$sha_file"

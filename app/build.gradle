@@ -10,7 +10,11 @@ def releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS")
 def releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
 def hasReleaseSigning = releaseStoreFile && releaseStorePassword
         && releaseKeyAlias && releaseKeyPassword
-def defaultVersionName = "4.0.4"
+def versionFile = rootProject.file("version.txt")
+if (!versionFile.isFile()) {
+    throw new GradleException("Missing version file: ${versionFile}")
+}
+def defaultVersionName = versionFile.getText("UTF-8").trim()
 def buildVersionName = (System.getenv("VERSION_NAME") ?: defaultVersionName)
         .replaceFirst(/-rewrite$/, "")
 def autoVersionCode = (System.currentTimeMillis() / 1000L) as int
