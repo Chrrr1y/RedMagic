@@ -2653,11 +2653,12 @@ private fun SoftwareVersionRow(
 ) {
     val colors = MaterialTheme.colorScheme
     val available = (result as? GitHubUpdateResult.Available)?.release
-    val summary = when {
-        isChecking -> "当前版本 v$versionName · 正在检查 GitHub 更新"
-        available != null -> "当前版本 v$versionName · 发现新版本 ${available.tagName}"
-        result is GitHubUpdateResult.UpToDate -> "当前版本 v$versionName · 已是最新版本"
-        else -> "当前版本 v$versionName · 检查失败，点击重试"
+    val latestVersion = when {
+        isChecking -> "检查中…"
+        available != null -> available.displayVersion()
+        result is GitHubUpdateResult.UpToDate -> result.release.displayVersion()
+        result is GitHubUpdateResult.Failed -> "获取失败"
+        else -> "尚未检查"
     }
 
     Row(
@@ -2678,10 +2679,17 @@ private fun SoftwareVersionRow(
             ) {
                 Text("软件版本", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
                 Text(
-                    summary,
+                    "当前版本：${versionName.withVersionPrefix()}",
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "最新版本：$latestVersion",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
@@ -2698,6 +2706,12 @@ private fun SoftwareVersionRow(
         }
     }
 }
+
+private fun GitHubRelease.displayVersion(): String =
+    (versionName ?: tagName).withVersionPrefix()
+
+private fun String.withVersionPrefix(): String =
+    if (startsWith("v", ignoreCase = true)) this else "v$this"
 
 private fun String.toColorSpecLabel(): String = when (this) {
     "SPEC_2021", "Spec_2021" -> "Spec_2021"
@@ -2830,30 +2844,42 @@ private fun PageScaleRow(iconRes: Int, scale: Float, onScaleChanged: (Float) -> 
             .padding(horizontal = 18.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-        Row(verticalAlignment = Alignment.Top) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             SettingsLeadingIcon(iconRes)
             Spacer(Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("页面缩放", style = MaterialTheme.typography.titleMedium, color = colors.onSurface)
-                        Text("调整应用界面和文字的整体尺寸", style = MaterialTheme.typography.bodySmall, color = colors.onSurfaceVariant)
-                    }
-                    Text("${(sliderValue * 100).roundToInt()}%", style = MaterialTheme.typography.labelLarge, color = colors.primary)
+                    Text(
+                        "页面缩放",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.onSurface
+                    )
+                    Text(
+                        "${(sliderValue * 100).roundToInt()}%",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.primary
+                    )
                 }
-                Slider(
-                    value = sliderValue,
-                    onValueChange = { sliderValue = it },
-                    onValueChangeFinished = {
-                        val snapped = (sliderValue * 20f).roundToInt() / 20f
-                        sliderValue = snapped
-                        onScaleChanged(snapped)
-                    },
-                    valueRange = 0.8f..1.2f,
-                    steps = 7
+                Text(
+                    "调整应用界面和文字的整体尺寸",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant
                 )
             }
         }
+        Slider(
+            modifier = Modifier.padding(start = 56.dp),
+            value = sliderValue,
+            onValueChange = { sliderValue = it },
+            onValueChangeFinished = {
+                val snapped = (sliderValue * 20f).roundToInt() / 20f
+                sliderValue = snapped
+                onScaleChanged(snapped)
+            },
+            valueRange = 0.8f..1.2f,
+            steps = 7
+        )
     }
 }
 
@@ -2937,7 +2963,7 @@ private fun AboutDeviceScreen() {
                     HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp, end = 18.dp))
                     DeviceInfoRow(R.drawable.ic_device, "设备型号", "${Build.MANUFACTURER} ${Build.MODEL}")
                     HorizontalDivider(color = colors.outlineVariant.copy(alpha = 0.45f), modifier = Modifier.padding(start = 74.dp, end = 18.dp))
-                    DeviceInfoRow(R.drawable.ic_fingerprint, "系统指纹", Build.FINGERPRINT)
+                    DeviceInfoRow(R.drawable.ic_fingerprint, "系统指纹", Build.FINGERPRINT, alignIconToTop = true)
                 }
             }
         }
@@ -2945,13 +2971,19 @@ private fun AboutDeviceScreen() {
 }
 
 @Composable
-private fun DeviceInfoRow(iconRes: Int, label: String, value: String?, isLoading: Boolean = false) {
+private fun DeviceInfoRow(
+    iconRes: Int,
+    label: String,
+    value: String?,
+    isLoading: Boolean = false,
+    alignIconToTop: Boolean = false
+) {
     val colors = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = if (alignIconToTop) Alignment.Top else Alignment.CenterVertically
     ) {
         SettingsLeadingIcon(iconRes)
         Spacer(Modifier.width(16.dp))

@@ -2,10 +2,12 @@ package dev.lackluster.redmagichelper.util;
 
 import android.util.Log;
 
+import dev.lackluster.redmagichelper.BuildConfig;
+
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-/** Writes errors and one hook result per outcome for each host process. */
+/** Writes diagnostics only in debug builds. */
 public final class HookLog {
     public static final String TAG = "RMH_REWRITE";
 
@@ -16,6 +18,10 @@ public final class HookLog {
     }
 
     public static void error(String component, String message, Throwable error) {
+        if (!BuildConfig.DEBUG) {
+            return;
+        }
+
         String normalizedComponent = clean(component);
         String normalizedMessage = clean(message);
         String key = normalizedComponent + '\n' + errorEvent(normalizedMessage);
@@ -44,6 +50,10 @@ public final class HookLog {
             String firstFailure,
             Throwable error
     ) {
+        if (!BuildConfig.DEBUG) {
+            return;
+        }
+
         String normalizedComponent = clean(component);
         boolean hasErrors = failed > 0;
         String resultKey = normalizedComponent + '\n' + (hasErrors ? "failed" : "success");

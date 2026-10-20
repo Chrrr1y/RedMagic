@@ -77,7 +77,7 @@ public final class HelperApplication extends Application {
                         remotePreferences = remote;
                         syncAll(remote);
                     } catch (Throwable error) {
-                        if (REMOTE_BIND_ERROR_REPORTED.compareAndSet(false, true)) {
+                        if (BuildConfig.DEBUG && REMOTE_BIND_ERROR_REPORTED.compareAndSet(false, true)) {
                             Log.e(TAG, "remote preference bind failed", error);
                         }
                     }
@@ -147,7 +147,7 @@ public final class HelperApplication extends Application {
     }
 
     private static void reportRemoteSyncError(Throwable error) {
-        if (REMOTE_SYNC_ERROR_REPORTED.compareAndSet(false, true)) {
+        if (BuildConfig.DEBUG && REMOTE_SYNC_ERROR_REPORTED.compareAndSet(false, true)) {
             Log.e(TAG, "remote preference sync failed", error);
         }
     }

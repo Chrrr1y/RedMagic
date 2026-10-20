@@ -100,8 +100,6 @@ public final class BrowserAdapter implements HostAdapter {
             "viewMoreHots",
             "search_hot_news",
             "news_container",
-            // SeekView's current ROM build renders “今日热点” through the
-            // generic BannerView row rather than HotNewsView.
             "banner_view",
             "active",
             "activeView",
@@ -110,14 +108,14 @@ public final class BrowserAdapter implements HostAdapter {
             "activeNews",
             "active_container",
             "activeContent",
-            "active_banner",
+            "active_banner"
     };
     private static final Set<String> SEARCH_CLEAN_ID_SET = new HashSet<>(
             java.util.Arrays.asList(SEARCH_CLEAN_IDS));
-    private static final String[] INFO_FLOW_IDS = {
-            "newsViewPager",
-            "infoFlowTitle"
-    };
+
+    // Keep the page container alive for the browser's own HomeFirstPageHelper;
+    // its data and visible content are removed after the page is initialized.
+    private static final String[] INFO_FLOW_IDS = {"infoFlowTitle"};
     private static final Set<String> INFO_FLOW_ID_SET = new HashSet<>(
             java.util.Arrays.asList(INFO_FLOW_IDS));
 
@@ -166,8 +164,6 @@ public final class BrowserAdapter implements HostAdapter {
             "djx_history_drama_layout",
             "djx_grid_drama_recycler_view"
     };
-    private static final Set<String> DRAMA_FEATURE_ID_SET = new HashSet<>(
-            java.util.Arrays.asList(DRAMA_FEATURE_IDS));
     private static final String[] HOMEPAGE_SETTING_OPTION_IDS = {
             "homepage_setting",
             "main_setting"
@@ -233,7 +229,11 @@ public final class BrowserAdapter implements HostAdapter {
         if (removeHomeHotNews || removeSearchHotNews) {
             installHotNewsAdapterRemoval(session, removeHomeHotNews, removeSearchHotNews);
         }
-        installBrowserContentViewRemoval(session);
+        // Keep the browser's global ViewGroup.addView methods untouched. Its
+        // HomeFirstPageHelper wires required views while constructing the
+        // first page; filtering children here can leave CustomViewPager null.
+        // Feature data is blocked at its source and remaining content is
+        // removed by bounded post-inflation cleanup below.
         // The OEM homepage destination and layout options are always removed;
         // optional content cleanup below remains controlled by module settings.
         installHomepageSettingsOptionRemoval(session);
@@ -942,122 +942,6 @@ public final class BrowserAdapter implements HostAdapter {
             hookEmptyMethod(session, newsDataManager, "E", listener);
         }
         session.log("BROWSER_INFO_FLOW_DATA_DISABLED");
-    }
-
-    /**
-     * Remove recommendation widgets before they attach to the browser view
-     * tree. The host can still construct unrelated settings and navigation
-     * views, while data adapters for the selected feature groups are also
-     * short-circuited below.
-     */
-    private static void installBrowserContentViewRemoval(HookSession session) {
-        if (!session.config().browserRemoveHomePageInfo()
-                && !session.config().browserRemoveHotWords()
-                && !session.config().browserRemoveInfoTabs()
-                && !session.config().browserSlimMine()) {
-            return;
-        }
-
-        HookSession.HookCallback addView = chain -> {
-            Object child = HookValues.arg(chain, 0);
-            if (child instanceof View
-                    && shouldRemoveBrowserFeatureView(session, (View) child)) {
-                return null;
-            }
-            return chain.proceed();
-        };
-        HookSession.HookCallback addViewInLayout = chain -> {
-            Object child = HookValues.arg(chain, 0);
-            if (child instanceof View
-                    && shouldRemoveBrowserFeatureView(session, (View) child)) {
-                return Boolean.FALSE;
-            }
-            return chain.proceed();
-        };
-
-        // Hook the central ViewGroup overloads. The simpler addView overloads
-        // delegate here, so hooking every overload adds work to every view
-        // attachment without improving coverage.
-        session.hook(ViewGroup.class, "addView", addView,
-                View.class, int.class, ViewGroup.LayoutParams.class);
-        session.hook(ViewGroup.class, "addViewInLayout", addViewInLayout,
-                View.class, int.class, ViewGroup.LayoutParams.class, boolean.class);
-        session.hook(ViewGroup.class, "attachViewToParent", addView,
-                View.class, int.class, ViewGroup.LayoutParams.class);
-        session.log("BROWSER_CONTENT_CONSTRUCTION_BLOCKED");
-    }
-
-    private static boolean shouldRemoveBrowserFeatureView(HookSession session, View view) {
-        try {
-            if (!session.packageName().equals(view.getContext().getPackageName())) {
-                return false;
-            }
-        } catch (Throwable ignored) {
-            return false;
-        }
-        String className = view.getClass().getName();
-        boolean removeHome = session.config().browserRemoveHomePageInfo()
-                || session.config().browserRemoveHotWords()
-                || session.config().browserSlimMine();
-        if (removeHome && className.endsWith("HotNewsViewForHome")) {
-            return true;
-        }
-        if (session.config().browserRemoveHotWords()
-                && (className.endsWith("HotNewsViewForSearch")
-                || className.endsWith("NuHotWordsView")
-                || className.endsWith("SearchKeyWordView"))) {
-            return true;
-        }
-        if (className.endsWith("BannerView")) {
-            Activity activity = findActivity(view.getContext(), null);
-            if (activity != null) {
-                String activityName = activity.getClass().getName();
-                if ((session.config().browserRemoveHomePageInfo()
-                        || session.config().browserSlimMine())
-                        && (activityName.endsWith("BrowserLauncher")
-                        || activityName.endsWith("BrowserActivity"))) {
-                    return true;
-                }
-                if (session.config().browserRemoveHotWords()
-                        && activityName.endsWith("SearchActivity")) {
-                    return true;
-                }
-            }
-        }
-        if (view.getId() == View.NO_ID) {
-            return false;
-        }
-        String resourceName = HookValues.resourceEntryName(view);
-        if (session.config().browserRemoveInfoTabs()
-                && HookValues.hasResourceId(view, session.packageName(), BOTTOM_HIDDEN_IDS)) {
-            return true;
-        }
-        if (session.config().browserSlimMine()) {
-            if (HookValues.hasResourceId(view, session.packageName(), MINE_HIDDEN_IDS)
-                    || HookValues.hasResourceId(view, session.packageName(), DRAMA_FEATURE_IDS)) {
-                return true;
-            }
-            String lowerClassName = className.toLowerCase(java.util.Locale.ROOT);
-            if (lowerClassName.contains(".djx.")
-                    || lowerClassName.startsWith("cn.nubia.drama.")) {
-                return true;
-            }
-        }
-        if (session.config().browserRemoveHomePageInfo()) {
-            if ("switch_model".equals(resourceName)
-                    || INFO_FLOW_ID_SET.contains(resourceName)) {
-                return true;
-            }
-        }
-        if (removeHome && HOME_HOT_NEWS_ID_SET.contains(resourceName)) {
-            return true;
-        }
-        if (session.config().browserRemoveHotWords()) {
-            if (SEARCH_CLEAN_ID_SET.contains(resourceName)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static void removeViewFromParent(View view) {
@@ -3297,6 +3181,69 @@ public final class BrowserAdapter implements HostAdapter {
         HookValues.runOnMain(root, () -> {
             removeConfiguredBrowserFeatureViews(session, root);
         });
+    }
+
+    /** Matches only nodes during explicit post-inflation cleanup passes. */
+    private static boolean shouldRemoveBrowserFeatureView(HookSession session, View view) {
+        try {
+            if (!session.packageName().equals(view.getContext().getPackageName())) {
+                return false;
+            }
+        } catch (Throwable ignored) {
+            return false;
+        }
+        String className = view.getClass().getName();
+        boolean removeHome = session.config().browserRemoveHomePageInfo()
+                || session.config().browserRemoveHotWords()
+                || session.config().browserSlimMine();
+        if (removeHome && className.endsWith("HotNewsViewForHome")) {
+            return true;
+        }
+        if (session.config().browserRemoveHotWords()
+                && (className.endsWith("HotNewsViewForSearch")
+                || className.endsWith("NuHotWordsView")
+                || className.endsWith("SearchKeyWordView"))) {
+            return true;
+        }
+        if (className.endsWith("BannerView")) {
+            Activity activity = findActivity(view.getContext(), null);
+            if (activity != null) {
+                String activityName = activity.getClass().getName();
+                if ((session.config().browserRemoveHomePageInfo()
+                        || session.config().browserSlimMine())
+                        && (activityName.endsWith("BrowserLauncher")
+                        || activityName.endsWith("BrowserActivity"))) {
+                    return true;
+                }
+                if (session.config().browserRemoveHotWords()
+                        && activityName.endsWith("SearchActivity")) {
+                    return true;
+                }
+            }
+        }
+        if (view.getId() == View.NO_ID) {
+            return false;
+        }
+        String resourceName = HookValues.resourceEntryName(view);
+        if (session.config().browserRemoveInfoTabs()
+                && HookValues.hasResourceId(view, session.packageName(), BOTTOM_HIDDEN_IDS)) {
+            return true;
+        }
+        if (session.config().browserSlimMine()
+                && (HookValues.hasResourceId(view, session.packageName(), MINE_HIDDEN_IDS)
+                || HookValues.hasResourceId(view, session.packageName(), DRAMA_FEATURE_IDS))) {
+            return true;
+        }
+        if (session.config().browserRemoveHomePageInfo()
+                && ("switch_model".equals(resourceName)
+                || INFO_FLOW_ID_SET.contains(resourceName))) {
+            return true;
+        }
+        if (removeHome && HOME_HOT_NEWS_ID_SET.contains(resourceName)) {
+            return true;
+        }
+        return session.config().browserRemoveHotWords()
+                && SEARCH_CLEAN_ID_SET.contains(resourceName);
     }
 
     private static void removeConfiguredBrowserFeatureViews(
