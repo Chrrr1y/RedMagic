@@ -16,8 +16,7 @@ public final class GameHelperAdapter implements HostAdapter {
     public void install(HookSession session) {
         boolean comboSpeedEnabled = session.config().getBoolean(
                 "game_space_combo_speed_enabled", false);
-        boolean comboEnabled = comboSpeedEnabled || session.config().getBoolean(
-                "game_safe_feature_gate", false);
+        boolean comboEnabled = comboSpeedEnabled;
         if (!comboEnabled) {
             session.log("GAME_HELPER_FEATURES_DISABLED");
             return;

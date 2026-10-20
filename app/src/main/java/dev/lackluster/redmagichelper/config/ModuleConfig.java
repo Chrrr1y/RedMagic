@@ -32,10 +32,6 @@ public final class ModuleConfig {
         return getBoolean("enable_module", true);
     }
 
-    public boolean gameFeaturesEnabled() {
-        return getBoolean("game_fuction_unfreeze_switch", false);
-    }
-
     public boolean browserEnabled() {
         return getBoolean("browser_open_search", false)
                 || getBoolean("browser_skip_splash", false)

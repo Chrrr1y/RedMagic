@@ -26,6 +26,8 @@ public final class HelperApplication extends Application {
     private static final String TAG = "RMH_REWRITE";
     private static final String GROUP = "config";
     private static final String FEATURE_DEFAULTS_MIGRATION = "rmh_feature_defaults_v4";
+    private static final String GAME_WINDOW_SETTINGS_MIGRATION =
+            "rmh_game_window_capabilities_migration_v1";
     private static final AtomicBoolean REMOTE_BIND_ERROR_REPORTED = new AtomicBoolean();
     private static final AtomicBoolean REMOTE_SYNC_ERROR_REPORTED = new AtomicBoolean();
     private static final ExecutorService REMOTE_SYNC_EXECUTOR =
@@ -66,7 +68,10 @@ public final class HelperApplication extends Application {
         localPreferences.registerOnSharedPreferenceChangeListener(preferenceListener);
         // Reading the existing config file for its one-time migration can block cold start.
         // Queue it before service synchronization so first-run defaults are still copied first.
-        REMOTE_SYNC_EXECUTOR.execute(() -> migrateRequestedFeatureDefaults(localPreferences));
+        REMOTE_SYNC_EXECUTOR.execute(() -> {
+            migrateRequestedFeatureDefaults(localPreferences);
+            migrateLegacyGameWindowSettings(localPreferences);
+        });
 
         XposedServiceHelper.registerListener(new XposedServiceHelper.OnServiceListener() {
             @Override
@@ -98,7 +103,6 @@ public final class HelperApplication extends Application {
         }
         preferences.edit()
                 .putBoolean("enable_module", true)
-                .putBoolean("game_fuction_unfreeze_switch", false)
                 .putBoolean("fan_unlock_max", false)
                 .putBoolean("fan_fixed_enabled", false)
                 .putBoolean("ai_trigger_switch", false)
@@ -117,6 +121,29 @@ public final class HelperApplication extends Application {
                 .putBoolean("mute_nfc_sound", false)
                 .putBoolean("nfc_allow_screen_off_recognition", false)
                 .putBoolean(FEATURE_DEFAULTS_MIGRATION, true)
+                .apply();
+    }
+
+    /** Move retired broad window toggles to the matching capability switches once. */
+    private static void migrateLegacyGameWindowSettings(SharedPreferences preferences) {
+        if (preferences.getBoolean(GAME_WINDOW_SETTINGS_MIGRATION, false)) {
+            return;
+        }
+
+        boolean legacyOverlayEnabled = preferences.getBoolean(
+                "game_fuction_unfreeze_switch", false);
+        boolean legacyFreeformEnabled = preferences.getBoolean(
+                "force_freeform_gamespace", false);
+        SharedPreferences.Editor editor = preferences.edit();
+        if (legacyOverlayEnabled && !preferences.contains("game_force_overlay_capability")) {
+            editor.putBoolean("game_force_overlay_capability", true);
+        }
+        if (legacyFreeformEnabled && !preferences.contains("game_allow_third_party_freeform")) {
+            editor.putBoolean("game_allow_third_party_freeform", true);
+        }
+        editor.putBoolean("game_fuction_unfreeze_switch", false)
+                .putBoolean("force_freeform_gamespace", false)
+                .putBoolean(GAME_WINDOW_SETTINGS_MIGRATION, true)
                 .apply();
     }
 

@@ -20,16 +20,16 @@ public final class GameLauncherAdapter implements HostAdapter {
                 "game_safe_feature_gate", false);
         boolean shoulderEnabled = session.config().getBoolean(
                 "game_shoulder_key_enabled", false)
-                || session.config().getBoolean("game_assist_shoulder_enabled", false)
-                || globalBlacklistBypass;
+                || session.config().getBoolean("game_assist_shoulder_enabled", false);
         boolean comboSpeedEnabled = session.config().getBoolean(
                 "game_space_combo_speed_enabled", false);
-        boolean comboEnabled = comboSpeedEnabled || globalBlacklistBypass;
+        boolean comboEnabled = comboSpeedEnabled;
         boolean superResolutionEnabled = session.config().gameSuperResolutionUnlimitedApps();
         boolean suppressSuperResolutionToasts = session.config().getBoolean(
                 "game_super_resolution_suppress_toasts", false);
         boolean forceOverlay = session.config().getBoolean("game_force_overlay_capability", false);
         if (!shoulderEnabled && !comboEnabled && !superResolutionEnabled && !forceOverlay
+                && !globalBlacklistBypass
                 && !suppressSuperResolutionToasts) {
             session.log("GAME_FEATURES_DISABLED");
             return;
@@ -53,13 +53,17 @@ public final class GameLauncherAdapter implements HostAdapter {
         }
         Class<?> lineService = session.findOptionalClass(
                 "cn.nubia.gamehelperline.LineService");
+        if (forceOverlay || (shoulderEnabled && lineService != null)) {
+            // Both shoulder-line support and the dedicated overlay option need
+            // this permission result. Register it once for this process.
+            session.hook(Settings.class, "canDrawOverlays",
+                    chain -> Boolean.TRUE, Context.class);
+        }
         if (shoulderEnabled && lineService != null) {
             session.hook(lineService, "isLineNotSupported",
                     chain -> Boolean.FALSE, String.class);
             session.hook(lineService, "isNotSupportedShowView",
                     chain -> Boolean.FALSE);
-            session.hook(android.provider.Settings.class, "canDrawOverlays",
-                    chain -> Boolean.TRUE, Context.class);
 
             session.hook(lineService, "onStartCommand", chain -> {
                 Object intentObj = HookValues.arg(chain, 0);
@@ -286,7 +290,6 @@ public final class GameLauncherAdapter implements HostAdapter {
         }
 
         if (forceOverlay) {
-            session.hook(Settings.class, "canDrawOverlays", chain -> Boolean.TRUE, Context.class);
             if (controlPanelFeatures != null) {
                 session.hook(controlPanelFeatures, "isFloatAppSupported", chain -> Boolean.TRUE);
                 session.hook(controlPanelFeatures, "isSupportFloatWindow", chain -> Boolean.TRUE);

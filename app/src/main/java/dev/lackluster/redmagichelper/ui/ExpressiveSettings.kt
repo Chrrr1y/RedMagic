@@ -3176,20 +3176,16 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
     "disable_flag_secure_enhanced" -> listOf("com.android.systemui")
 
     // 通用与游戏
-    "game_fuction_unfreeze_switch" -> listOf(
-        "cn.nubia.gamelauncher",
-        "cn.nubia.gameassist",
-        "cn.zte.gamefloat",
-        "cn.nubia.gamehelpmodule"
-    )
     "game_force_overlay_capability" -> listOf(
+        "cn.nubia.gamelauncher",
+        "com.nubia.tgkservice",
+        "cn.nubia.tgk",
+        "cn.nubia.gamehelperline",
         "cn.zte.gamefloat",
         "cn.nubia.gameassist"
     )
     "game_allow_third_party_freeform" -> listOf(
-        "cn.zte.gamefloat",
-        "cn.nubia.gameassist",
-        "com.zte.recommend"
+        "cn.nubia.gameassist"
     )
     "game_magic_voice_unfreeze" -> listOf(
         "cn.nubia.gameassist",
@@ -3208,8 +3204,7 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
         "com.nubia.tgkservice",
         "cn.nubia.tgk",
         "cn.nubia.gamehelperline",
-        "cn.nubia.gameassist",
-        "cn.nubia.gamehelpmodule"
+        "cn.nubia.gameassist"
     )
     "game_shoulder_rapid_fire_multiplier" -> listOf(
         "cn.nubia.gamelauncher",
@@ -3219,8 +3214,7 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
     "game_safe_feature_gate" -> listOf(
         "cn.nubia.gamehelperline",
         "cn.nubia.gamelauncher",
-        "cn.nubia.gameassist",
-        "cn.nubia.gamehelpmodule"
+        "cn.nubia.gameassist"
     )
     "game_4d_vibration_unlimited_apps" -> listOf("cn.nubia.gameassist")
     "game_super_resolution_suppress_toasts" -> listOf(
@@ -3236,7 +3230,8 @@ private fun getPackagesForSettingKey(key: String): List<String> = when (key) {
     "game_space_combo_speed_enabled",
     "game_space_combo_speed_rate" -> listOf(
         "cn.nubia.gamelauncher",
-        "cn.nubia.gameassist"
+        "cn.nubia.gameassist",
+        "cn.nubia.gamehelpmodule"
     )
     "ai_trigger_switch",
     "ai_trigger_template_scan_ms" -> listOf(

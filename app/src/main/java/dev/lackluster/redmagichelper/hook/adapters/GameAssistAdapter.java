@@ -17,15 +17,13 @@ public final class GameAssistAdapter implements HostAdapter {
     public void install(HookSession session) {
         installFixedScreenStateGuard(session);
 
-        boolean unfreeze = session.config().gameFeaturesEnabled();
         boolean globalBlacklistBypass = session.config().getBoolean(
                 "game_safe_feature_gate", false);
         boolean shoulderEnabled = session.config().getBoolean(
                 "game_shoulder_key_enabled", false)
-                || session.config().getBoolean("game_assist_shoulder_enabled", false)
-                || globalBlacklistBypass;
+                || session.config().getBoolean("game_assist_shoulder_enabled", false);
         boolean comboEnabled = session.config().getBoolean(
-                "game_space_combo_speed_enabled", false) || globalBlacklistBypass;
+                "game_space_combo_speed_enabled", false);
         boolean vibrationUnlimited = session.config().getBoolean(
                 "game_4d_vibration_unlimited_apps", false);
         boolean superResolutionUnlimited = session.config().gameSuperResolutionUnlimitedApps();
@@ -35,11 +33,11 @@ public final class GameAssistAdapter implements HostAdapter {
         boolean voiceUnfreeze = session.config().getBoolean("game_magic_voice_unfreeze", false);
         boolean soundUnfreeze = session.config().getBoolean("game_space_sound_effects_unfreeze", false);
         boolean sightUnfreeze = session.config().getBoolean("game_sight_assist_unfreeze", false);
-        boolean freeformUnfreeze = session.config().getBoolean("game_allow_third_party_freeform", false)
-                || forceOverlay;
+        boolean freeformUnfreeze = session.config().getBoolean(
+                "game_allow_third_party_freeform", false);
         boolean safeFeatureGate = globalBlacklistBypass || shoulderEnabled || comboEnabled
                 || superResolutionUnlimited || vibrationUnlimited || forceOverlay
-                || voiceUnfreeze || soundUnfreeze || sightUnfreeze || freeformUnfreeze || unfreeze
+                || voiceUnfreeze || soundUnfreeze || sightUnfreeze || freeformUnfreeze
                 || suppressSuperResolutionToasts;
         if (!safeFeatureGate) {
             session.log("GAME_FEATURES_DISABLED");

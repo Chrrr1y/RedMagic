@@ -138,9 +138,8 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
         SettingItem.Toggle("屏幕录制增强忽略 FLAG_SECURE（谨慎）", "disable_flag_secure_enhanced", "扩大系统截图策略修改范围，只在确认需要时启用。")
     ),
     SettingCategory.GAMING to listOf(
-        SettingItem.Toggle("游戏功能限制解锁", "game_fuction_unfreeze_switch", "控制游戏功能限制解除；放行肩键、辅助线、连招、变声器和超境等入口与系统限制。"),
-        SettingItem.Toggle("允许第三方悬浮窗", "game_force_overlay_capability", "解除系统限制，强制允许第三方应用在游戏内显示悬浮窗。"),
-        SettingItem.Toggle("允许第三方小窗挂起", "game_allow_third_party_freeform", "解除游戏空间小窗挂起限制，允许第三方应用挂起为悬浮小窗。"),
+        SettingItem.Toggle("允许第三方悬浮窗", "game_force_overlay_capability", "允许第三方应用在游戏内使用普通悬浮窗；游戏空间小窗挂起由下方单独控制。"),
+        SettingItem.Toggle("允许第三方小窗挂起", "game_allow_third_party_freeform", "只解锁游戏空间的 Host Freeform 与聊天辅助小窗能力，不授予普通悬浮窗权限。"),
         SettingItem.Toggle("游戏变声器限制解除", "game_magic_voice_unfreeze", "解除游戏变声器机型限制，适配全机型魔音变声与悬浮窗。"),
         SettingItem.Toggle("游戏空间音效限制解除", "game_space_sound_effects_unfreeze", "解除游戏空间音效机型限制，支持DTS/杜比全景声音效配置。"),
         SettingItem.Toggle("准星助手全机型解锁", "game_sight_assist_unfreeze", "解锁准星辅助全机型支持，支持自定义十字准星悬浮窗。"),
@@ -158,10 +157,9 @@ internal val categorySettings: Map<SettingCategory, List<SettingItem>> = mapOf(
         SettingItem.Toggle("游戏空间主动模式解锁", "acive_mode_switch", "解除游戏空间主动模式限制。"),
         SettingItem.Toggle("超境模式与插帧允许所有应用", "game_super_resolution_unlimited_apps", "解除超境画质（超分辨率）与补帧（GFRC/MEMC）内置应用白名单限制，强制对所有游戏生效。"),
         SettingItem.Toggle("屏蔽超境画质提示 Toast", "game_super_resolution_suppress_toasts", "屏蔽开启、关闭超境画质以及过热自动关闭时弹出的 Toast 提示。"),
-        SettingItem.Toggle("全局绕过游戏助手黑名单", "game_safe_feature_gate", "拦截黑名单检测，使侧边栏在任意应用中均可呼出，肩键连招等功能正常使用。"),
+        SettingItem.Toggle("全局绕过游戏助手黑名单", "game_safe_feature_gate", "仅跳过游戏助手黑名单判断；不会自动启用肩键或连招，需分别开启对应功能。"),
         SettingItem.Toggle("4D震感解锁所有应用", "game_4d_vibration_unlimited_apps", "解除游戏助手 4D 震感的应用白名单限制，在所有应用中显示并使用 4D 震感入口。"),
         SettingItem.Toggle("游戏空间强制全屏横屏", "force_landscape_gamespace", "解决系统更新后游戏空间可能出现的旋转异常，强制以全屏横屏展示。"),
-        SettingItem.Toggle("游戏空间任意应用浮窗", "force_freeform_gamespace", "在游戏空间内支持将任意第三方应用作为小窗/悬浮窗运行。"),
         SettingItem.Toggle("禁用游戏投屏悬浮图标", "disable_screen_projection_floating_icon", "隐藏游戏投屏时常驻在屏幕边缘的浮动悬浮球。"),
         SettingItem.Toggle("隐藏吃鸡模式连招弹窗", "hide_chicken_mode_dialog", "启用连招功能时不再弹出吃鸡模式安全风险提示框。"),
         SettingItem.Toggle("游戏连招加速", "game_space_combo_speed_enabled", "按设定倍率缩短一键连招的触摸间隔，加速播放执行。"),

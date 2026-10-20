@@ -7,10 +7,9 @@ import dev.lackluster.redmagichelper.hook.HookSession;
 public final class GameFloatAdapter implements HostAdapter {
     @Override
     public void install(HookSession session) {
-        boolean gameFeatures = session.config().gameFeaturesEnabled();
         boolean forceOverlay = session.config().getBoolean("game_force_overlay_capability", false);
         boolean hidePrompt = session.config().getBoolean("game_space_devil_mode_hide_prompt", false);
-        if (!gameFeatures && !forceOverlay && !hidePrompt) {
+        if (!forceOverlay && !hidePrompt) {
             session.log("GAME_FEATURES_DISABLED");
             return;
         }
@@ -19,7 +18,7 @@ public final class GameFloatAdapter implements HostAdapter {
                     "cn.zte.gamefloat.gamekeys.entity.GameChickenModeDialog$ChickenModeDialog");
             session.hook(dialog, "show", chain -> null);
         }
-        if (forceOverlay || gameFeatures) {
+        if (forceOverlay) {
             Class<?> floatUtil = session.findOptionalClass("cn.zte.gamefloat.utils.FloatWindowUtils");
             if (floatUtil != null) {
                 session.hook(floatUtil, "isSupportFloatWindow", chain -> Boolean.TRUE);
