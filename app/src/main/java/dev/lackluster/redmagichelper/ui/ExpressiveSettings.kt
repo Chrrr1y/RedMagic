@@ -2657,7 +2657,7 @@ private fun SoftwareVersionRow(
         isChecking -> "检查中…"
         available != null -> available.displayVersion()
         result is GitHubUpdateResult.UpToDate -> result.release.displayVersion()
-        result is GitHubUpdateResult.Failed -> "获取失败"
+        result is GitHubUpdateResult.Failed -> "请检查网络"
         else -> "尚未检查"
     }
 
