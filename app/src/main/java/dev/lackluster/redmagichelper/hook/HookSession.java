@@ -6,9 +6,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -315,18 +313,45 @@ public final class HookSession {
         return loader == null ? "<bootstrap>" : loader.getClass().getName();
     }
 
-    private static final ThreadLocal<Set<Integer>> ACTIVE_HOOKS =
-            ThreadLocal.withInitial(HashSet::new);
+    /** Reused per-thread recursion state. It stores only active nesting depth, not every hook id. */
+    private static final class ActiveHookIds {
+        private int[] ids = new int[8];
+        private int size;
+
+        boolean contains(int id) {
+            for (int index = 0; index < size; index++) {
+                if (ids[index] == id) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        void add(int id) {
+            if (size == ids.length) {
+                ids = java.util.Arrays.copyOf(ids, ids.length * 2);
+            }
+            ids[size++] = id;
+        }
+
+        void remove(int id) {
+            for (int index = size - 1; index >= 0; index--) {
+                if (ids[index] == id) {
+                    ids[index] = ids[--size];
+                    ids[size] = 0;
+                    return;
+                }
+            }
+        }
+    }
+
+    private static final ThreadLocal<ActiveHookIds> ACTIVE_HOOKS =
+            ThreadLocal.withInitial(ActiveHookIds::new);
     private static final AtomicInteger HOOK_SEQUENCE = new AtomicInteger();
 
     public void hook(Method method, HookCallback callback) {
         if (method == null) {
             return;
-        }
-        try {
-            method.setAccessible(true);
-        } catch (Throwable ignored) {
-            // LibXposed can still hook some inaccessible framework methods.
         }
         final int hookId = HOOK_SEQUENCE.incrementAndGet();
         String id = "rmh-rewrite/" + packageName + "/" + method.getDeclaringClass().getName()
@@ -334,7 +359,7 @@ public final class HookSession {
                 + "#" + hookId;
         try {
             HookCallback normalizedCallback = chain -> {
-                Set<Integer> active = ACTIVE_HOOKS.get();
+                ActiveHookIds active = ACTIVE_HOOKS.get();
                 if (active.contains(hookId)) {
                     return chain.proceed();
                 }
@@ -348,13 +373,11 @@ public final class HookSession {
                     return value;
                 } finally {
                     active.remove(hookId);
-                    if (active.isEmpty()) {
-                        ACTIVE_HOOKS.remove();
-                    }
                 }
             };
             XposedInterface.HookHandle handle = module.hook(method)
                     .setId(id)
+                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
                     .intercept(normalizedCallback::intercept);
             handles.add(handle);
             installedHooks.incrementAndGet();

@@ -224,8 +224,7 @@ object BrowserSettingsCompose {
             else -> null
         }
 
-    class BrowserComposeBridge(val activity: Activity) :
-        LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
+    class BrowserComposeBridge : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner {
 
         private val lifecycleRegistry = LifecycleRegistry(this)
         private val savedStateRegistryController = SavedStateRegistryController.create(this)
@@ -612,7 +611,7 @@ object BrowserSettingsCompose {
 
             updateSystemBars(activity, isDarkTheme(activity))
 
-            val bridge = BrowserComposeBridge(activity)
+            val bridge = BrowserComposeBridge()
             bridges[activity] = bridge
             bridge.attach(decorView)
 
@@ -685,7 +684,7 @@ object BrowserSettingsCompose {
 
             updateSystemBars(activity, isDarkTheme(activity))
 
-            val bridge = BrowserComposeBridge(activity)
+            val bridge = BrowserComposeBridge()
             bridges[activity] = bridge
             bridge.attach(decorView)
 
@@ -726,7 +725,7 @@ object BrowserSettingsCompose {
             val origMain = contentParent.getChildAt(0)
             origMain?.visibility = View.GONE
 
-            val bridge = BrowserComposeBridge(activity)
+            val bridge = BrowserComposeBridge()
             bridges[activity] = bridge
             bridge.attach(decorView)
 
@@ -762,7 +761,7 @@ object BrowserSettingsCompose {
 
             updateSystemBars(activity, isDarkTheme(activity))
 
-            val bridge = BrowserComposeBridge(activity)
+            val bridge = BrowserComposeBridge()
             bridges[activity] = bridge
             bridge.attach(decorView)
 

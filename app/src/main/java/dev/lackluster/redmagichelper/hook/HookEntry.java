@@ -45,6 +45,8 @@ public final class HookEntry extends XposedModule {
     private volatile String lastPackageName;
     private volatile ClassLoader lastClassLoader;
     private volatile ApplicationInfo lastApplicationInfo;
+    private volatile String installedPackageName;
+    private volatile ClassLoader installedClassLoader;
 
     @Override
     public void onModuleLoaded(XposedModuleInterface.ModuleLoadedParam param) {
@@ -89,6 +91,8 @@ public final class HookEntry extends XposedModule {
                 HookLog.error("entry", "HOT_RELOAD_UNHOOK_FAILED", error);
             }
         }
+        installedPackageName = null;
+        installedClassLoader = null;
         refreshPreferences();
         Object saved = param.getSavedInstanceState();
         if (saved instanceof Object[]) {
@@ -150,7 +154,11 @@ public final class HookEntry extends XposedModule {
         }
     }
 
-    private void installForPackage(String packageName, ClassLoader classLoader, ApplicationInfo info) {
+    private synchronized void installForPackage(
+            String packageName,
+            ClassLoader classLoader,
+            ApplicationInfo info
+    ) {
         ModuleConfig current = config;
         if (current == null || !current.enabled()) {
             return;
@@ -160,16 +168,23 @@ public final class HookEntry extends XposedModule {
         if (adapter == null) {
             return;
         }
+        if (packageName.equals(installedPackageName) && classLoader == installedClassLoader) {
+            return;
+        }
 
         HookSession session = new HookSession(this, packageName, classLoader, info, current);
-        if (!"android".equals(packageName)) {
-            installConfigProviderSync(session);
-        }
         try {
+            if (!"android".equals(packageName)) {
+                installConfigProviderSync(session);
+            }
             adapter.install(session);
+            installedPackageName = packageName;
+            installedClassLoader = classLoader;
         } catch (Throwable error) {
             session.recordFailure("ADAPTER_FAILED", error);
             session.unhookAll();
+            installedPackageName = null;
+            installedClassLoader = null;
         } finally {
             session.logScanSummary();
         }
@@ -197,19 +212,6 @@ public final class HookEntry extends XposedModule {
                 } catch (Throwable ignored) {}
                 return res;
             });
-        }
-
-        Class<?> actClass = session.findOptionalClass("android.app.Activity");
-        if (actClass != null) {
-            session.hook(actClass, "onCreate", chain -> {
-                try {
-                    Object thiz = chain.getThisObject();
-                    if (thiz instanceof android.content.Context) {
-                        session.trySyncConfigFromProvider((android.content.Context) thiz);
-                    }
-                } catch (Throwable ignored) {}
-                return chain.proceed();
-            }, android.os.Bundle.class);
         }
     }
 
